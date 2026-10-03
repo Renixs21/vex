@@ -57,3 +57,13 @@ The laptop mic did not pick up its own speakers (echo cancellation), so the voic
 | V5 | Say "delete <a test file on the Desktop>" (red) | Vex says "I need your approval on screen"; saying "yes" does nothing; a click approves. |
 | V6 | Tray > Mute microphone, press the hotkey | "The microphone is muted." Tray > Type a command still works. |
 | V7 | Unplug or disable the mic and press the hotkey | A tray notice explains it and the typed prompt opens. |
+
+## Wake word (needs your voice)
+| # | Do | Expect |
+|---|---|---|
+| W1 | `python main.py --console`; say "Hey Jarvis", then "what's the time" | blip, orb listening, correct time spoken. Log: `wake detected ... score`, `trigger from wakeword -> started`, `wake word resumed` |
+| W2 | Say "Hey Jarvis, open notepad" in one breath | Notepad opens (the words after the phrase are kept) |
+| W3 | Ask for a long answer ("tell me about Mars") | Vex never starts a new turn while it is speaking |
+| W4 | Tray > Wake word off, say "Hey Jarvis" | nothing; the tray line says `Wake word: off`. Turn it on again |
+| W5 | Unplug/disable the mic | one notification "Wake word unavailable. The hotkey still works."; hotkey still works; it recovers when the mic is back |
+| W6 | Ten minutes of a YouTube video near the mic | at most one false wake (`wakeword_tune.py --quiet 10` counts them) |

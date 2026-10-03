@@ -35,7 +35,14 @@ orb_port = 47474                     # Vex -> orb (UDP, localhost)
 orb_click_port = 47475               # orb -> Vex: clicking the orb starts listening
 
 [wakeword]
-enabled = true                       # tray toggle; the wake-word listener itself comes in a later phase
+enabled = true                       # tray toggle too; every value here is validated, a bad one falls back to its default
+model_path = "models/hey_vex.onnx"   # your trained model (docs/WAKEWORD.md); until it exists the fallback below is used
+fallback_model = "hey_jarvis"        # built-in openWakeWord model: say "Hey Jarvis"
+threshold = 0.5                      # raise to 0.6-0.7 if it wakes by accident, lower if it misses you (tools_dev/wakeword_tune.py)
+cooldown = 2.0                       # seconds between wakes
+vad_threshold = 0.5                  # openWakeWord's own speech gate (0 = off)
+input_device = ""                    # blank = the [voice] input_device / default microphone
+chime = true                         # a soft blip when it wakes
 
 [voice]
 enabled = true

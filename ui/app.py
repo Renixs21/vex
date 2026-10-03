@@ -47,12 +47,43 @@ def build_visual(ui_cfg: dict, pill, on_click, notify):
     return MultiFrontend([orb_front, NullFrontend()]), orb, clicks
 
 
+def build_wakeword(controller, stack, notify):
+    """The "Hey Vex" listener, wired into the controller's single trigger path; None when voice is off."""
+    import config
+    from voice.wakeword import WakeWordListener, play_chime
+
+    if stack is None:
+        return None
+    wcfg = config.wakeword_config()
+    holder: dict = {}
+
+    def on_wake() -> str:
+        if controller.mic_muted:
+            return controller.start_listening("wakeword")                       # says "The microphone is muted." and returns "muted"
+        if wcfg["chime"]:
+            play_chime(blocking=False)                                           # a soft blip; the listener keeps hearing meanwhile
+        stack.recorder.seed = holder["listener"].take_audio                      # words said right after the wake phrase, fetched when recording starts
+        result = controller.start_listening("wakeword")
+        if result not in ("started", "barge_in"):
+            stack.recorder.seed = None
+        return result
+
+    listener = WakeWordListener(on_wake, model_path=wcfg["model_path"], fallback_model=wcfg["fallback_model"],
+                                threshold=wcfg["threshold"], cooldown=wcfg["cooldown"], vad_threshold=wcfg["vad_threshold"],
+                                device=wcfg["input_device"] or stack.recorder.device, notify=notify)
+    holder["listener"] = listener
+    controller.on_interaction_start.append(listener.pause)                      # every turn, whatever started it
+    controller.on_interaction_end.append(listener.resume)                       # after the reply has finished speaking
+    return listener
+
+
 def startup_summary(parts: dict, hotkey_text: str, console: bool) -> list[str]:
     """What was started, in plain words (printed at launch and logged), so a silent failure is never silent."""
     import config
     from ui.orb_frontend import OrbProcess
 
     hk, stack, orb, pill = parts["hotkey"], parts["voice"], parts["orb"], parts["pill"]
+    wake = parts.get("wakeword")
     ui_cfg = config.settings["ui"]
     lines = ["Vex is running."]
     lines.append(f"  Hotkey {hotkey_text}: " + ("registered" if hk.active else f"NOT available ({hk.error})"))
@@ -68,6 +99,8 @@ def startup_summary(parts: dict, hotkey_text: str, console: bool) -> list[str]:
                      f"| speech: {', '.join(providers)}")
     else:
         lines.append("  Voice: off (typing only)")
+    if wake is not None:
+        lines.append(f"  Wake word: {wake.label}" + (" (starting)" if config.wakeword_config()["enabled"] else " (off; tray > Wake word)"))
     lines.append(f"  Tray icon: bottom-right of the taskbar (Listen now / Type a command / Quit)")
     lines.append(f"  Log file: {config.log_file()}")
     lines.append("  Stop it from the tray menu (Quit Vex)" + (" or press Ctrl+C here." if console else "."))
@@ -136,6 +169,8 @@ def run(on_ready=None, console: bool = False) -> int:
     holder["controller"] = controller
 
     def cleanup() -> None:
+        if wake is not None:
+            wake.stop()
         hotkey.stop()
         controller.shutdown()
         reminders.stop()
@@ -147,14 +182,28 @@ def run(on_ready=None, console: bool = False) -> int:
     tray = TrayController(app, controller, frontend, executor, on_quit=cleanup, hotkey_text=pretty_combo(ui_cfg["hotkey"]))
     holder["tray"] = tray
     hotkey = GlobalHotkey(ui_cfg["hotkey"], controller.start_listening, on_error=tray.notify)
+    wake = build_wakeword(controller, stack, tray.notify)
+    if wake is not None:
+        def toggle_wake(on: bool) -> None:
+            (wake.start if on else wake.stop)()
+            tray.set_wakeword_status(wake.label, on)
+
+        controller.on_wakeword_toggle.append(toggle_wake)
     tray.show()
     frontend.show()
     frontend.set_state("idle")
     tray.set_hotkey_status(hotkey.start(), pretty_combo(ui_cfg["hotkey"]))
     reminders.start()
+    if wake is not None:
+        import config as _config
+
+        on = bool(_config.wakeword_config()["enabled"])
+        tray.set_wakeword_status(wake.label, on)
+        if on:
+            wake.start()
     parts = {"app": app, "controller": controller, "frontend": frontend, "tray": tray, "executor": executor,
              "confirmer": confirmer, "dialog": dialog, "agent": agent, "hotkey": hotkey, "capture": controller.capture,
-             "typed": typed, "voice": stack, "orb": orb, "pill": pill}
+             "typed": typed, "voice": stack, "orb": orb, "pill": pill, "wakeword": wake}
     summary = startup_summary(parts, pretty_combo(ui_cfg["hotkey"]), console)
     for line in summary:
         print(line, flush=True)

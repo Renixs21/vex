@@ -11,6 +11,7 @@ tool function directly. Per message it:
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 import tools
 from brain.llm import FallbackClient, build_client
@@ -23,6 +24,12 @@ from tools.registry import ToolResult
 
 log = logging.getLogger("vex.agent")
 MAX_HISTORY = 40
+
+
+def now_text(now: datetime | None = None) -> str:
+    """'Sunday 4 October 2026, 12:53 AM (IST)': the model has no clock of its own and would otherwise guess."""
+    now = now or datetime.now().astimezone()
+    return f"{now:%A %d %B %Y, %I:%M %p}".replace(" 0", " ") + f" ({now:%Z})"
 
 
 class Agent:
@@ -53,6 +60,7 @@ class Agent:
     def system_prompt(self, user_text: str) -> str:
         """The system prompt plus the memory facts relevant to this message (kept out of the stored history)."""
         base = SYSTEM_PROMPT.replace("{categories}", categories.category_summary())
+        base += f"\nCurrent date and time on the user's PC: {now_text()}. Use this for any question about the time or date.\n"
         mem = self._memory()
         if mem is None:
             return base

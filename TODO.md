@@ -19,6 +19,9 @@
 
 - Orb integrated (docs/ORB.md): `vex_ui/` is started by Vex, driven over UDP, click-to-listen via a second UDP port, pill fallback.
 
+- Wake word (docs/WAKEWORD.md): listener, tray switch + active model, chime, pause/resume around every turn, calibration tool, virtual-mic
+  simulation. Win32 hotkey (Ctrl+Alt+V) replaced the `keyboard` library; stage logging; single instance; `--console`.
+
 ## Deferred
 | Deferred | Needs | Unblocked by |
 |---|---|---|
@@ -27,12 +30,12 @@
 | Google Cloud TTS against the real service (built and tested with a fake client) | your `google-tts-key.json` | when you add it |
 | Voice loop verified with a human voice (V0-V7 in docs/SMOKE_TESTS.md) | you | now |
 | Orb refinements: the orb only gets state/level/caption; a visible indicator for "muted" or "needs approval" would need new protocol fields | your design | later |
-| Wake-word listener: the tray switch and the controller hooks (`on_interaction_start/end`, `on_wakeword_toggle`) already exist | openWakeWord | wake-word task |
+| Train `models/hey_vex.onnx` in Colab (docs/WAKEWORD.md); until then "Hey Jarvis" is the fallback | you | when you have time |
+| Wake word tested with a real human voice (simulated with a virtual mic so far: `tools_dev/wakeword_sim.py`) | you | now |
 | `memory/curator.py` (post-conversation extraction, inbox, daily summaries) + its tests | the controller's idle hook (exists now) | next |
 | `memory/consolidate.py` nightly job | curator + scheduler | Phase 5 |
 | Memory viewer `ui/memory.html` (the tray item is a placeholder that opens the notes folder) | PySide6 window | next |
 | Semantic search via an `Embedder` | embedding API choice | later |
-| Wake word (`WAKEWORD_PROMPT.md`) | recorder, STT, TTS, orb, tray | Phases 2-3 |
 | Reminders: tray "list/cancel" UI, voice announcement of a fired reminder | TTS | Phase 2 |
 
 ## Known limitations

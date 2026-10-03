@@ -133,6 +133,7 @@ class Recorder:
         self._factory = stream_factory
         self.on_level = on_level
         self._peak = 0.0
+        self.seed = None      # one-shot: audio (16 kHz int16), or a function returning it, treated as the first thing heard (the wake word's post-wake buffer)
 
     # ---- device ----------------------------------------------------------------------------------------------------------
     def _resolve_device(self):
@@ -147,6 +148,14 @@ class Recorder:
                 return i
         log.warning("input device %r not found; using the default microphone", self.device)
         return None
+
+    def resolve_device(self):
+        """Public form of the device lookup (the wake-word listener opens its stream the same way)."""
+        return self._resolve_device()
+
+    def open_stream(self, device, callback):
+        """Public form of the stream opener: (stream, rate). Raises MicUnavailable."""
+        return self._open(device, callback)
 
     def _open(self, device, callback):
         """Open an input stream, trying 16 kHz mono first, then the device's own rate. Returns (stream, rate)."""
@@ -200,6 +209,13 @@ class Recorder:
             except Exception:  # noqa: BLE001 - never raise into the audio thread
                 pass
 
+        seed, self.seed = self.seed, None
+        if callable(seed):                                        # fetched now, at the last moment, so it covers the chime and start-up gap
+            seed = seed()
+        if seed is not None and len(seed) >= FRAME:
+            for i in range(0, len(seed) - FRAME + 1, FRAME):
+                frames.put_nowait(seed[i:i + FRAME])
+            log.info("recorder seeded with %.2fs of audio heard right after the wake word", len(seed) / RATE)
         device = self._resolve_device()
         stream, rate = self._open_with_retry(device, callback, rate_holder)
         preroll: deque[np.ndarray] = deque(maxlen=max(1, self.preroll_ms // FRAME_MS))

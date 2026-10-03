@@ -30,6 +30,9 @@ _READ_REST = re.compile(
     r"continue\s+reading)(?:\s+(?:out|aloud|out\s+loud|to\s+me))?$")
 
 
+from voice.wakeword import strip_wake_phrase  # noqa: E402
+
+
 def is_read_rest(text: str) -> bool:
     """True for 'read the rest', 'say the rest', 'read it all', ... (case and punctuation ignored)."""
     t = re.sub(r"[^a-z\s]", " ", (text or "").lower())
@@ -181,6 +184,8 @@ class VexController:
                 self._set_state(LISTENING)
                 self._active_capture = self.typed_capture if mode == "typed" else self.capture
                 text = self._active_capture()
+                if text and mode != "typed":
+                    text = strip_wake_phrase(text)                       # "Hey Vex, open notepad" -> "open notepad"
             if not text or not text.strip() or self._shutdown:
                 self.frontend.show_caption("")
                 return

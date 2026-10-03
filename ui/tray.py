@@ -63,6 +63,7 @@ class TrayController(QObject):
 
         self.status_action = self._add("status", "Vex: Ready", enabled=False)
         self.hotkey_action = self._add("hotkey", f"Hotkey {hotkey_text}", enabled=False)
+        self.wakeword_action = self._add("wakeword_status", "Wake word: not available", enabled=False)
         self._add("listen", "Listen now", self._listen)
         self._add("type", "Type a command", self._type_command)
         self.menu.addSeparator()
@@ -108,6 +109,13 @@ class TrayController(QObject):
             self.tray.showMessage(title, message, QSystemTrayIcon.Information, 6000)
         else:
             log.info("%s: %s", title, message)
+
+    def set_wakeword_status(self, label: str, on: bool) -> None:
+        """Show which model is active ("Hey Vex" or "Hey Jarvis (fallback)") and whether the listener is on."""
+        self.wakeword_action.setText(f"Wake word: {label}" if on else f"Wake word: off ({label})")
+        act = self.actions.get("wakeword")
+        if act is not None and act.isChecked() != on:
+            act.setChecked(on)
 
     def set_hotkey_status(self, active: bool, combo: str) -> None:
         self.hotkey_action.setText(f"Hotkey {combo}" + ("" if active else " (unavailable)"))

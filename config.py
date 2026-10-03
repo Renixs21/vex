@@ -39,7 +39,8 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "orb_dir": "vex_ui", "orb_position": "bottom", "orb_palette": "blue", "orb_size": "", "orb_autosleep": 0,
         "orb_port": 47474, "orb_click_port": 47475,
     },
-    "wakeword": {"enabled": True},
+    "wakeword": {"enabled": True, "model_path": "models/hey_vex.onnx", "fallback_model": "hey_jarvis", "threshold": 0.5,
+                 "cooldown": 2.0, "vad_threshold": 0.5, "input_device": "", "chime": True},
     "voice": {
         "enabled": True,
         "input_device": "",              # blank = Windows default microphone; or part of a device name
@@ -141,6 +142,29 @@ def env(name: str, default: str = "") -> str:
 
 def dry_run() -> bool:
     return env("DRY_RUN").lower() in ("1", "true", "yes")
+
+
+def wakeword_config() -> dict:
+    """The [wakeword] section with every value checked: a bad value is logged and replaced by its default, never raised."""
+    d = dict(DEFAULTS["wakeword"])
+    raw = settings.get("wakeword", {}) or {}
+    log = logging.getLogger("vex.config")
+    ranges = {"threshold": (0.05, 0.99), "cooldown": (0.0, 60.0), "vad_threshold": (0.0, 0.99)}
+    for key, default in DEFAULTS["wakeword"].items():
+        if key not in raw:
+            continue
+        v = raw[key]
+        if isinstance(default, bool):
+            ok = isinstance(v, bool)
+        elif key in ranges:
+            ok = isinstance(v, (int, float)) and not isinstance(v, bool) and ranges[key][0] <= float(v) <= ranges[key][1]
+        else:
+            ok = isinstance(v, str)
+        if ok:
+            d[key] = float(v) if key in ranges else v
+        else:
+            log.warning("[wakeword] %s = %r is not valid; using %r", key, v, default)
+    return d
 
 
 def log_file() -> Path:
