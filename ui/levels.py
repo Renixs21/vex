@@ -87,8 +87,9 @@ class LevelPump:
 class SoundDevicePlayer:
     """Plays PCM audio through sounddevice and pumps levels in step with it. speak/stop are thread-safe."""
 
-    def __init__(self, sd_module=None):
+    def __init__(self, sd_module=None, device=None):
         self._sd = sd_module
+        self.device = device                    # output device index or name part; None = the Windows default
         self._pump: LevelPump | None = None
         self._lock = threading.Lock()
 
@@ -106,7 +107,10 @@ class SoundDevicePlayer:
         levels = rms_levels(x, sample_rate)
         with self._lock:
             self._pump = LevelPump(on_level, levels)
-            self.sd.play(x, sample_rate)
+            if self.device is None:
+                self.sd.play(x, sample_rate)
+            else:
+                self.sd.play(x, sample_rate, device=self.device)
             self._pump.start()
         try:
             self.sd.wait()

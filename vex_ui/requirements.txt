@@ -1,0 +1,8 @@
+moderngl>=5.8
+PySide6>=6.5
+numpy
+pillow
+# optional:
+# sounddevice   # --mic : orb reacts to your voice while listening
+# pygame        # client.speak_file(): plays gTTS mp3s while animating
+# pydub         # real loudness envelope when speaking (needs ffmpeg)

@@ -184,6 +184,7 @@ class QtConfirmer(QObject):
 
     _show_requested = Signal(object)
     _close_requested = Signal()
+    _resolve_requested = Signal(object)
 
     def __init__(self, input_guard_ms: int = 500, notify=None, parent=None):
         super().__init__(parent)
@@ -192,6 +193,7 @@ class QtConfirmer(QObject):
         self.active_dialog: ConfirmDialog | None = None
         self._show_requested.connect(self._show)
         self._close_requested.connect(self._close_active)
+        self._resolve_requested.connect(self._resolve)
 
     def confirm(self, req: ConfirmRequest) -> Confirmation:
         if QThread.currentThread() is self.thread():        # already on the GUI thread: nested modal loop
@@ -229,6 +231,18 @@ class QtConfirmer(QObject):
         dlg.finished.connect(finished)
         self._announce(pending.req)
         dlg.present()
+
+    def resolve_active(self, result: Confirmation) -> None:
+        """Close the open dialog (if any) because the question was answered elsewhere (e.g. by voice). Thread-safe."""
+        self._resolve_requested.emit(result)
+
+    @Slot(object)
+    def _resolve(self, result: Confirmation) -> None:
+        dlg = self.active_dialog
+        if dlg is not None:
+            if dlg.result_value is None:
+                dlg.result_value = result
+            dlg.reject()
 
     @Slot()
     def _close_active(self) -> None:

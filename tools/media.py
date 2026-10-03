@@ -43,7 +43,7 @@ def press_media_key(vk: int) -> None:
 
 
 @tool("media_control", "Play/pause, next, previous or stop whatever is playing.",
-      {"action": {"type": "string", "enum": list(VK), "description": "play_pause, next, previous or stop"}},
+      {"action": {"type": "string", "enum": list(VK), "description": "play_pause = pause or resume; next; previous; stop"}},
       describe=lambda a: f"Media key: {a['action']}")
 def media_control(action: str) -> ToolResult:
     if action not in VK:

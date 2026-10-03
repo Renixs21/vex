@@ -92,3 +92,22 @@ def more_tools(category: str) -> registry.ToolResult:
     if spec is None:
         return registry.ToolResult(False, f"Unknown category '{category}'. Use one of: {', '.join(CATEGORIES)}.")
     return registry.ToolResult(True, f"Added the {category} tools: {', '.join(spec['tools'])}.", {"category": category})
+
+
+# ---- routing: which messages are simple enough for the small, fast model ------------------------------------------------
+SIMPLE_GROUPS = {"system", "media", "apps", "tasks"}
+_NOT_SIMPLE = re.compile(r"\b(?:delete|forget|shutdown|shut\s+down|restart|reboot|admin|administrator|elevated|powershell|run|execute|"
+                         r"script|remember|note|notes|summari[sz]e|explain|why|write|draft|compare)\b", re.I)
+_VERB_START = re.compile(r"\s*(?:open|play|launch|start)\b", re.I)
+
+
+def simple_command(text: str) -> bool:
+    """True for a short, single-purpose command the small model handles as well as the big one (measured: volume, brightness,
+    media keys, open/play, tasks, system info). Memory, shell, file changes and open-ended questions stay on the big model."""
+    words = (text or "").split()
+    if not 1 <= len(words) <= 12 or _NOT_SIMPLE.search(text):
+        return False
+    groups = match(text)
+    if groups:
+        return len(groups) == 1 and next(iter(groups)) in SIMPLE_GROUPS
+    return bool(_VERB_START.match(text))

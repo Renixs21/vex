@@ -28,3 +28,30 @@ in Vex's own limiter because the free tier allows only 5 requests/minute. Differ
 
 Free-tier facts found on the way: `gemini-flash-latest` (now Gemini 3.8 Flash) and `gemini-2.5-flash` allow only 20 requests per day
 per model on this project; each model has its own quota. Config now orders Groq first, Gemini second.
+
+
+## Model ladder and routing (2026-10-03, later)
+
+Groq limits are **per model** on this account: each of gpt-oss-120b, gpt-oss-20b and qwen3.8-27b has its own 1,000 requests/day and
+8,000 tokens/minute, and (seen on 120b) 200,000 tokens/day. The ladder is now gpt-oss-120b, then gpt-oss-20b, then Gemini.
+
+Tool-calling accuracy on 22 commands (`tools_dev/eval_models.py`, nothing executed):
+
+| Model | Correct | Median per request | Misses |
+|---|---|---|---|
+| gpt-oss-120b | 20/22 | 1.25 s | 2 Groq 400s: `remember` offered an invalid default for an enum (fixed) |
+| gpt-oss-20b | 19/22 | 0.88 s | "pause" sent as stop; 2 transient network errors |
+| qwen3.8-27b | 20/22 | 8.6 s | too slow for a fast path |
+
+Five-command bench through the real ladder (`tools_dev/bench_routing.py`):
+
+| Run | Avg turn | Requests by model (avg request time) | 429s |
+|---|---|---|---|
+| big first (`route_simple = false`) | 3.5 s | 120b 7 (0.71 s), 20b 3 (0.67 s) | 1 |
+| simple commands routed to 20b | 4.2 s | 20b 8 (0.87 s), 120b 1 (0.76 s) | 4 |
+
+Reading it: per-request latency is the same within noise (0.7-0.9 s), so routing is **not** a speed-up. What it does: 8 of 9 requests
+used the small model's separate budget, protecting the big model's 200k tokens/day for harder commands, and quality on the simple set was
+equal. A burst of five commands in under a minute still exhausts a model's 8,000 tokens/minute; when both Groq models were limited the
+last command fell through to Gemini, which exposed (and this round fixed) a 400 error: Gemini 3 rejects history function calls that lack
+a thought signature, which calls made by Groq never have.

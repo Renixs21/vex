@@ -80,6 +80,8 @@ class Agent:
             elevation.begin_turn(user_text)               # only the user's own message can enable admin rights
         self.history.append({"role": "user", "text": user_text})
         self._trim()
+        if hasattr(self.llm, "prefer"):                   # routing: simple one-tool commands go to the small, fast model first
+            self.llm.prefer = "groq-small" if settings["llm"]["route_simple"] and categories.simple_command(user_text) else None
         system = self.system_prompt(user_text)
         active = categories.match(user_text) | self._carry
         requested: set[str] = set()                       # groups the model asked for with more_tools

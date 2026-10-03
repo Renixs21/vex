@@ -29,6 +29,7 @@ from tools.registry import Tool
 
 log = logging.getLogger("vex.llm")
 
+GEMINI_FOREIGN_CALL_SIGNATURE = b"skip_thought_signature_validator"
 RETRY_AFTER_FAILOVER = 3.0          # seconds: a longer "retry after" means switch provider instead of waiting
 MAX_COOLDOWN = 6 * 3600.0
 
@@ -123,7 +124,8 @@ def retry_after(e: BaseException) -> float | None:
     details = getattr(e, "details", None)
     blob = json.dumps(details, default=str) if details is not None else ""
     for text in (blob, str(e)):
-        m = re.search(r"retryDelay['\"]?\s*:\s*['\"]?([0-9hms.]+)", text) or re.search(r"[Rr]etry in ([0-9hms.]+)", text)
+        m = (re.search(r"retryDelay['\"]?\s*:\s*['\"]?([0-9hms.]+)", text)
+             or re.search(r"(?:[Rr]etry|[Tt]ry again) in ([0-9hms.]+)", text))               # Gemini / Groq wording
         if m and (d := parse_duration(m.group(1).rstrip("."))) is not None:
             return d
     return None
@@ -180,8 +182,10 @@ class GeminiClient:
                     out.append(m["raw"])  # keeps thought signatures intact
                 else:
                     parts = [types.Part(text=m["text"])] if m["text"] else []
-                    parts += [types.Part(function_call=types.FunctionCall(name=c.name, args=c.args))
-                              for c in m["tool_calls"]]
+                    # Gemini 3 rejects history function calls without a thought signature. Calls made by another provider
+                    # (Groq) have none, so they get Google's documented placeholder, which skips the check.
+                    parts += [types.Part(function_call=types.FunctionCall(name=c.name, args=c.args),
+                                         thought_signature=GEMINI_FOREIGN_CALL_SIGNATURE) for c in m["tool_calls"]]
                     out.append(types.Content(role="model", parts=parts or [types.Part(text="")]))
             else:  # tool result
                 part = types.Part(function_response=types.FunctionResponse(name=m["name"], response=m["result"]))
@@ -223,9 +227,10 @@ class GroqClient:
     name = "groq"
 
     def __init__(self, model: str, api_key: str, rpm: float, attempts: int = 2, fail_over_after: float = RETRY_AFTER_FAILOVER,
-                 reasoning_effort: str = "low"):
+                 reasoning_effort: str = "low", name: str = "groq"):
         from groq import Groq
 
+        self.name = name                                                # "groq", "groq-small": each model has its own limits
         self.model = model
         self.client = Groq(api_key=api_key, max_retries=0)              # no hidden SDK retries
         self.limiter = RateLimiter(rpm)
@@ -304,6 +309,7 @@ class FallbackClient:
         self._clock = clock
         self._off_until: dict[str, float] = {}      # provider name -> time before which we don't try it first
         self.stats: list[dict] = []                 # one record per successful request: provider, tokens, tools, seconds
+        self.prefer: str | None = None              # try this provider first (set per message by the agent's router)
 
     def _order(self) -> list[LLMClient]:
         """Providers in preference order, with any that are cooling down moved to the end (last resort)."""
@@ -314,6 +320,8 @@ class FallbackClient:
             if c.name in self._off_until:             # its cooldown just ended
                 log.info("LLM: cooldown over, trying %s again", c.name)
                 del self._off_until[c.name]
+        if self.prefer:                               # routing: e.g. simple commands go to the small, fast model first
+            ready.sort(key=lambda c: c.name != self.prefer)           # stable: everything else keeps its order
         return ready + cooling
 
     def generate(self, system: str, messages: list[dict], tools: list[Tool]) -> LLMResponse:
@@ -359,6 +367,7 @@ def build_client() -> FallbackClient:
     specs = {
         "gemini": (GeminiClient, "GEMINI_API_KEY", "gemini_model", "gemini_rpm"),
         "groq": (GroqClient, "GROQ_API_KEY", "groq_model", "groq_rpm"),
+        "groq-small": (GroqClient, "GROQ_API_KEY", "groq_small_model", "groq_rpm"),       # separate model = separate limits
     }
     wanted = []
     for name in cfg["order"]:
@@ -370,13 +379,13 @@ def build_client() -> FallbackClient:
         if key and not model:
             log.warning("%s is set but [llm] %s is empty in config.toml; skipping that provider", key_name, model_key)
         elif key:
-            wanted.append((cls, model, key, cfg[rpm_key]))
+            wanted.append((name, cls, model, key, cfg[rpm_key]))
     # with a fallback available, give up on a struggling provider quickly; with only one, be more patient
     solo = len(wanted) <= 1
     attempts = max(cfg["failover_attempts"], 4) if solo else cfg["failover_attempts"]
     fail_over_after = 20.0 if solo else RETRY_AFTER_FAILOVER
     clients: list[LLMClient] = []
-    for cls, model, key, rpm in wanted:
-        extra = {"reasoning_effort": cfg["groq_reasoning_effort"]} if cls is GroqClient else {}
+    for name, cls, model, key, rpm in wanted:
+        extra = {"reasoning_effort": cfg["groq_reasoning_effort"], "name": name} if cls is GroqClient else {}
         clients.append(cls(model, key, rpm, attempts, fail_over_after, **extra))
     return FallbackClient(clients, cooldown=cfg["failover_cooldown"])

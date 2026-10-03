@@ -1,7 +1,9 @@
 [llm]
-order = ["groq", "gemini"]             # providers in preference order (Gemini free tier: ~20 requests/day per model)
+order = ["groq", "groq-small", "gemini"]   # providers in preference order. Limits are per model on Groq (200k tokens/day each)
 gemini_model = "gemini-3.5-flash-lite" # each Gemini model has its own free quota; "-latest" aliases and 2.5-flash ran out fast
 groq_model = "openai/gpt-oss-120b"
+groq_small_model = "openai/gpt-oss-20b"   # own rate limits; faster; next fallback and first choice for simple commands
+route_simple = true                    # simple one-tool commands (volume, open, play...) go to groq-small first
 gemini_rpm = 5                         # client-side limit: free tier allows 5 requests/minute
 groq_rpm = 25
 groq_reasoning_effort = "low"          # gpt-oss models: short thinking, and none of it leaked into replies
@@ -20,8 +22,39 @@ confirm_timeout = 30                   # seconds to answer a y/n confirmation; n
 typed_timeout = 60                     # seconds to type CONFIRM for catastrophic commands
 
 [ui]
-hotkey = "windows+alt+v"             # global hotkey: start listening, or stop speaking and listen
+hotkey = "ctrl+alt+v"                # global hotkey (Win32 RegisterHotKey): start listening, or stop speaking and listen
+                                     # modifiers: ctrl, alt, shift, win; e.g. "ctrl+shift+f9"
 caption_seconds = 8                  # how long the pill keeps showing the last caption once idle
+visual = "orb"                       # orb = the marbled orb app in vex_ui/ ; pill = small built-in widget ; both
+orb_dir = "vex_ui"
+orb_position = "bottom"              # bottom, bottom-right, bottom-left, center, top-right
+orb_palette = "blue"                 # blue, default (grey), violet, emerald
+orb_size = ""                        # e.g. "420x340"; blank = the orb's default
+orb_autosleep = 0                    # seconds idle before the orb fades away (0 = stays)
+orb_port = 47474                     # Vex -> orb (UDP, localhost)
+orb_click_port = 47475               # orb -> Vex: clicking the orb starts listening
 
 [wakeword]
 enabled = true                       # tray toggle; the wake-word listener itself comes in a later phase
+
+[voice]
+enabled = true
+input_device = ""                      # blank = Windows default microphone; or part of a device name, e.g. "Intel"
+output_device = ""
+silence_ms = 1000                      # this much quiet after you speak ends the recording
+max_seconds = 20
+no_speech_seconds = 6                  # give up if nothing is said for this long
+vad_aggressiveness = 2                 # 0-3, higher filters more background noise
+stt_model = "whisper-large-v3-turbo"
+language = "en"                        # "" = let Whisper detect the language (Hindi, Kannada...)
+stt_seconds_per_hour = 7200            # Groq's free Whisper allowance; tracked locally so Vex falls back to typing early
+tts_order = ["google", "edge"]         # Google needs google-tts-key.json; without it edge-tts is used
+google_voice = "en-US-Chirp3-HD-Aoede"
+google_language = "en-US"
+edge_voice = "en-US-AriaNeural"
+tts_monthly_free_chars = 1000000       # Google's free monthly characters for Chirp 3 HD (check your console)
+tts_switch_fraction = 0.9              # switch to edge-tts at this share of the allowance
+spoken_max_chars = 280
+spoken_sentences = 2                   # longer replies: speak this many sentences; "read the rest" speaks the remainder
+confirm_by_voice = true                # yellow confirmations can be answered by voice (red never)
+confirm_voice_seconds = 6              # how long after Vex asks that "yes"/"no" is accepted

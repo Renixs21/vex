@@ -374,8 +374,8 @@ class FakeController:
         self.listeners = []
         self.on_wakeword_toggle = []
 
-    def start_listening(self, source="hotkey"):
-        self.calls.append(("listen", source))
+    def start_listening(self, source="hotkey", typed=False):
+        self.calls.append(("typed" if typed else "listen", source))
         return "started"
 
     def set_mic_muted(self, muted):
@@ -408,7 +408,7 @@ def tray(tmp_path, qapp, monkeypatch):
 
 def test_tray_menu_has_every_requested_item(tray):
     labels = {k: a.text() for k, a in tray.actions.items()}
-    assert set(tray.actions) == {"status", "hotkey", "listen", "show", "mute", "wakeword", "dry_run", "memory", "logs", "quit"}
+    assert set(tray.actions) == {"status", "hotkey", "listen", "type", "show", "mute", "wakeword", "dry_run", "memory", "logs", "quit"}
     assert labels["listen"] == "Listen now" and "memory" in labels["memory"].lower() and labels["quit"].startswith("Quit")
     assert [tray.actions[k].isCheckable() for k in ("show", "mute", "wakeword", "dry_run")] == [True] * 4
     assert tray.actions["show"].isChecked() and tray.actions["wakeword"].isChecked()
@@ -418,6 +418,12 @@ def test_tray_menu_has_every_requested_item(tray):
 def test_tray_listen_now_uses_the_shared_entry_point(tray):
     tray.actions["listen"].trigger()
     assert tray.c.calls == [("listen", "tray")]
+
+
+def test_tray_type_a_command_uses_the_typed_prompt(tray):
+    tray.actions["type"].trigger()
+    assert tray.c.calls == [("typed", "tray")]
+    assert tray.actions["type"].text() == "Type a command"
 
 
 def test_tray_show_hide_mute_dry_run(tray):

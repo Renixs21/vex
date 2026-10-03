@@ -18,10 +18,12 @@ log = logging.getLogger("vex.config")
 
 DEFAULTS: dict[str, dict[str, Any]] = {
     "llm": {
-        "order": ["groq", "gemini"],     # providers in preference order
+        "order": ["groq", "groq-small", "gemini"],     # providers in preference order
         "tool_groups": True,             # send a core tool set + matching groups; false = send every tool every time
         "gemini_model": "",
         "groq_model": "",
+        "groq_small_model": "",          # a smaller, faster Groq model: next fallback, and first choice for simple commands
+        "route_simple": True,            # send simple one-tool commands to groq-small first
         "gemini_rpm": 5,
         "groq_rpm": 25,
         "groq_reasoning_effort": "low",   # gpt-oss models only: low = short thinking, none leaked into replies
@@ -31,8 +33,37 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "safety": {"extra_safe_folders": [], "confirm_timeout": 30, "typed_timeout": 60},
     "paths": {"vault": "VexVault", "logs": "logs"},
-    "ui": {"hotkey": "windows+alt+v", "caption_seconds": 8, "visual": "pill"},
+    "ui": {
+        "hotkey": "ctrl+alt+v", "caption_seconds": 8,
+        "visual": "orb",                 # orb (the marbled orb app), pill (small built-in Qt widget) or both
+        "orb_dir": "vex_ui", "orb_position": "bottom", "orb_palette": "blue", "orb_size": "", "orb_autosleep": 0,
+        "orb_port": 47474, "orb_click_port": 47475,
+    },
     "wakeword": {"enabled": True},
+    "voice": {
+        "enabled": True,
+        "input_device": "",              # blank = Windows default microphone; or part of a device name
+        "output_device": "",
+        "silence_ms": 1000,              # this much quiet after you speak ends the recording
+        "max_seconds": 20,
+        "no_speech_seconds": 6,          # give up if nothing is said for this long
+        "vad_aggressiveness": 2,         # 0-3, higher filters more noise
+        "preroll_ms": 500,
+        "stt_model": "whisper-large-v3-turbo",
+        "language": "en",                # "" = let Whisper detect the language (Hindi, Kannada...)
+        "stt_prompt": "Vex, a voice assistant on Windows. Commands such as open Notepad or set the volume.",
+        "stt_seconds_per_hour": 7200,    # Groq's free Whisper allowance; checked locally so we fail to typing early
+        "tts_order": ["google", "edge"],
+        "google_voice": "en-US-Chirp3-HD-Aoede",
+        "google_language": "en-US",
+        "edge_voice": "en-US-AriaNeural",
+        "tts_monthly_free_chars": 1000000,   # Google's free monthly characters for Chirp 3 HD (check your console)
+        "tts_switch_fraction": 0.9,          # switch to edge-tts at this share of the free allowance
+        "spoken_max_chars": 280,
+        "spoken_sentences": 2,           # longer replies: speak this many sentences, show the rest ("read the rest" speaks it)
+        "confirm_by_voice": True,        # yellow confirmations can be answered by voice (red never)
+        "confirm_voice_seconds": 6,
+    },
 }
 
 
@@ -112,8 +143,12 @@ def dry_run() -> bool:
     return env("DRY_RUN").lower() in ("1", "true", "yes")
 
 
-def setup_logging(level: int = logging.INFO) -> None:
-    """Console (warnings) + rotating file log in logs/."""
+def log_file() -> Path:
+    return ROOT / settings["paths"]["logs"] / "vex.log"
+
+
+def setup_logging(level: int = logging.INFO, console: bool = False) -> None:
+    """Rotating file log in logs/vex.log, plus the terminal: warnings only, or everything at INFO when console=True."""
     logs = ROOT / settings["paths"]["logs"]
     logs.mkdir(exist_ok=True)
     root = logging.getLogger()
@@ -124,7 +159,9 @@ def setup_logging(level: int = logging.INFO) -> None:
     fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     root.addHandler(fh)
     ch = logging.StreamHandler()
-    ch.setLevel(logging.WARNING)
+    ch.setLevel(logging.INFO if console else logging.WARNING)
+    if console:
+        ch.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s", datefmt="%H:%M:%S"))
     root.addHandler(ch)
 
 

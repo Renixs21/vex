@@ -173,3 +173,41 @@ def test_each_request_logs_provider_tools_and_tokens(caplog):
         g.generate("sys", [{"role": "user", "text": "hi"}], registry.tools_for())
     line = [r.getMessage() for r in caplog.records if "LLM request" in r.getMessage()][0]
     assert "provider=groq" in line and "tools=6" in line and "prompt_tokens=612" in line and "completion_tokens=9" in line
+
+
+# ---- routing simple commands to the small model -------------------------------------------------------------------------------
+@pytest.mark.parametrize("message", [
+    "set the volume to 20 percent", "mute", "unmute the sound", "set brightness to 40", "take a screenshot",
+    "how much battery do I have left?", "open notepad", "play lofi beats on youtube", "play some jazz", "pause the music",
+    "next track", "add buy milk to my tasks", "remind me in 20 minutes to stretch", "what's on my to-do list?", "close notepad",
+    "lock my pc"])
+def test_simple_commands_go_to_the_small_model(message):
+    assert categories.simple_command(message)
+
+
+@pytest.mark.parametrize("message", [
+    "remember that my exam is on the 20th", "who is my roommate?", "what is two plus two?", "create a file notes.txt on my desktop saying hi",
+    "run powershell: Get-Date", "search the web for python 3.13 release date", "delete the old screenshot", "forget Rahul",
+    "summarise my notes", "shut down the pc", "set the volume and then open notepad and play jazz and mute and create a file",
+    "set the volume to 20 and delete the file", "", "explain how the volume mixer works", "run it as administrator"])
+def test_everything_else_stays_on_the_big_model(message):
+    assert not categories.simple_command(message)
+
+
+def test_the_agent_sets_the_routing_hint_per_message(make_agent, monkeypatch):
+    llm = FakeLLM("ok", "ok", "ok")
+    agent, _ = make_agent(llm)
+    agent.run("set the volume to 20 percent")
+    agent.run("remember that my exam is on the 20th")
+    monkeypatch.setitem(__import__("config").settings["llm"], "route_simple", False)
+    agent.run("mute")
+    assert llm.prefer_seen == ["groq-small", None, None]
+
+
+def test_remember_schema_never_offers_an_invalid_enum_default():
+    t = registry.get("remember")
+    assert t.parameters["required"] == ["fact"] and "default" not in t.parameters["properties"]["note_type"]
+    for tool_ in registry.all_tools():                                  # general rule: an enum parameter may not default to a value outside it
+        for name, prop in tool_.parameters["properties"].items():
+            if "enum" in prop and "default" in prop:
+                assert prop["default"] in prop["enum"], (tool_.name, name)

@@ -1,4 +1,4 @@
-"""Vex desktop app: tray + visual + hotkey + native confirmations, wired to the agent.
+"""Vex desktop app: tray + visual + hotkey + native confirmations + voice, wired to the agent.
 
 Run with `python main.py`. (`python main.py --text` is the terminal chat.)
 """
@@ -13,12 +13,72 @@ log = logging.getLogger("vex.app")
 
 
 def pretty_combo(combo: str) -> str:
-    return "+".join(p.capitalize() if len(p) > 1 else p.upper() for p in combo.replace("windows", "win").split("+"))
+    return "+".join(p.capitalize() if len(p) > 1 else p.upper() for p in combo.lower().replace("windows", "win").split("+"))
 
 
-def run(on_ready=None) -> int:
+def build_visual(ui_cfg: dict, pill, on_click, notify):
+    """The visual(s) to drive: the orb app (default), the Qt pill, or both. Falls back to the pill if the orb can't start.
+
+    Returns (frontend, OrbProcess | None, ClickListener | None).
+    """
+    from config import ROOT
+    from ui.frontend import NullFrontend
+    from ui.orb_frontend import ClickListener, MultiFrontend, OrbFrontend, OrbProcess
+
+    mode = ui_cfg["visual"]
+    if mode == "pill":
+        return pill, None, None
+    orb = OrbProcess(ROOT / ui_cfg["orb_dir"], port=ui_cfg["orb_port"], click_port=ui_cfg["orb_click_port"],
+                     position=ui_cfg["orb_position"], palette=ui_cfg["orb_palette"], size=ui_cfg["orb_size"],
+                     autosleep=ui_cfg["orb_autosleep"])
+    if not orb.start():
+        notify("Vex", "The orb couldn't start, so I'm using the small pill instead. See docs/ORB.md.")
+        return pill, None, None
+    clicks = None
+    try:
+        clicks = ClickListener(ui_cfg["orb_click_port"], on_click)
+        clicks.start()
+    except OSError as e:                                         # port taken: the orb still works, just without click-to-talk
+        log.warning("click port %s unavailable (%s); clicking the orb won't start listening", ui_cfg["orb_click_port"], e)
+    orb_front = OrbFrontend(ui_cfg["orb_port"])
+    if mode == "both":
+        return MultiFrontend([orb_front, pill]), orb, clicks
+    pill.hide()
+    return MultiFrontend([orb_front, NullFrontend()]), orb, clicks
+
+
+def startup_summary(parts: dict, hotkey_text: str, console: bool) -> list[str]:
+    """What was started, in plain words (printed at launch and logged), so a silent failure is never silent."""
+    import config
+    from ui.orb_frontend import OrbProcess
+
+    hk, stack, orb, pill = parts["hotkey"], parts["voice"], parts["orb"], parts["pill"]
+    ui_cfg = config.settings["ui"]
+    lines = ["Vex is running."]
+    lines.append(f"  Hotkey {hotkey_text}: " + ("registered" if hk.active else f"NOT available ({hk.error})"))
+    if orb is not None:
+        how = "started by Vex" if orb.started_by_us else "already running"
+        lines.append(f"  Orb: {how} (UDP {ui_cfg['orb_port']}, click-back on {ui_cfg['orb_click_port']})")
+    else:
+        lines.append("  Visual: built-in pill (the orb is off or could not start)")
+    if stack is not None:
+        providers = [p.name + ("" if p.available() else " (not configured)") for p in stack.chain.providers]
+        mic = stack.recorder.device or "default microphone"
+        lines.append(f"  Voice: on | mic: {mic} | speech recognition: Groq {stack.stt.model} ({'ready' if stack.stt.available else 'NO KEY'}) "
+                     f"| speech: {', '.join(providers)}")
+    else:
+        lines.append("  Voice: off (typing only)")
+    lines.append(f"  Tray icon: bottom-right of the taskbar (Listen now / Type a command / Quit)")
+    lines.append(f"  Log file: {config.log_file()}")
+    lines.append("  Stop it from the tray menu (Quit Vex)" + (" or press Ctrl+C here." if console else "."))
+    return lines
+
+
+def run(on_ready=None, console: bool = False) -> int:
     """Start the app. `on_ready(parts: dict)` (optional) is called once everything is built, before the event loop starts."""
-    from PySide6.QtCore import QLockFile
+    import signal
+
+    from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication, QMessageBox
 
     import config
@@ -37,14 +97,33 @@ def run(on_ready=None) -> int:
     app.setApplicationName("Vex")
     app.setQuitOnLastWindowClosed(False)
 
-    lock = QLockFile(str(Path(tempfile.gettempdir()) / "vex-app.lock"))
-    lock.setStaleLockTime(0)
-    if not lock.tryLock(200):
-        QMessageBox.information(None, "Vex", "Vex is already running (look for its icon in the tray).")
-        return 1
+    signal.signal(signal.SIGINT, lambda *_: app.quit())              # Ctrl+C in the terminal quits cleanly...
+    sigint_pump = QTimer()
+    sigint_pump.start(250)                                           # ...once Python gets a chance to run between Qt events
+    sigint_pump.timeout.connect(lambda: None)
 
     holder: dict = {}
-    confirmer = QtConfirmer(notify=lambda title, msg: holder["tray"].notify(title, msg) if "tray" in holder else None)
+    ui_cfg, voice_cfg = config.settings["ui"], config.settings["voice"]
+
+    def notify(title: str, message: str) -> None:
+        if "tray" in holder:
+            holder["tray"].notify(title, message)
+
+    pill = QtPillFrontend(on_click=lambda src: holder["controller"].start_listening(src),
+                          caption_seconds=float(ui_cfg["caption_seconds"]))
+    frontend, orb, clicks = build_visual(ui_cfg, pill, lambda src: holder["controller"].start_listening(src), notify)
+    typed = TextPromptCapture()
+
+    # voice: recorder + Whisper + TTS chain; the typed prompt stays available as the fallback and from the tray
+    stack = None
+    if voice_cfg["enabled"]:
+        from voice.factory import build_voice
+
+        stack = build_voice(on_level=frontend.set_level, notify=notify, typed_fallback=typed)
+    dialog = QtConfirmer(notify=notify)
+    confirmer = (stack.wrap_confirmer(dialog, is_muted=lambda: holder["controller"].mic_muted, on_level=frontend.set_level)
+                 if stack else dialog)
+
     executor = build_default_executor(confirmer)
     try:
         agent = Agent(executor=executor)
@@ -52,30 +131,36 @@ def run(on_ready=None) -> int:
         QMessageBox.critical(None, "Vex can't start", str(e))
         return 1
 
-    ui_cfg = config.settings["ui"]
-    controller_ref: dict = {}
-    frontend = QtPillFrontend(on_click=lambda src: controller_ref["c"].start_listening(src),
-                              caption_seconds=float(ui_cfg["caption_seconds"]))
-    controller = VexController(agent, frontend, SimulatedSpeaker(), TextPromptCapture())
-    controller_ref["c"] = controller
+    controller = VexController(agent, frontend, stack.speaker if stack else SimulatedSpeaker(),
+                               stack.capture if stack else typed, typed_capture=typed)
+    holder["controller"] = controller
 
     def cleanup() -> None:
         hotkey.stop()
         controller.shutdown()
         reminders.stop()
-        lock.unlock()
+        if clicks is not None:
+            clicks.stop()
+        if orb is not None:
+            orb.stop()
 
     tray = TrayController(app, controller, frontend, executor, on_quit=cleanup, hotkey_text=pretty_combo(ui_cfg["hotkey"]))
     holder["tray"] = tray
     hotkey = GlobalHotkey(ui_cfg["hotkey"], controller.start_listening, on_error=tray.notify)
     tray.show()
     frontend.show()
+    frontend.set_state("idle")
     tray.set_hotkey_status(hotkey.start(), pretty_combo(ui_cfg["hotkey"]))
     reminders.start()
-    log.info("Vex is running")
+    parts = {"app": app, "controller": controller, "frontend": frontend, "tray": tray, "executor": executor,
+             "confirmer": confirmer, "dialog": dialog, "agent": agent, "hotkey": hotkey, "capture": controller.capture,
+             "typed": typed, "voice": stack, "orb": orb, "pill": pill}
+    summary = startup_summary(parts, pretty_combo(ui_cfg["hotkey"]), console)
+    for line in summary:
+        print(line, flush=True)
+        log.info(line.strip())
     if on_ready is not None:
-        on_ready({"app": app, "controller": controller, "frontend": frontend, "tray": tray, "executor": executor,
-                  "confirmer": confirmer, "agent": agent, "hotkey": hotkey, "capture": controller.capture})
+        on_ready(parts)
     code = app.exec()
     cleanup()
     return code

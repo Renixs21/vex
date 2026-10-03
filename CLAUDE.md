@@ -22,7 +22,7 @@ Work through this **phase by phase**. At the start, read this whole document, th
 | Brain (LLM, tool calling) | Google Gemini Flash via AI Studio API key (`google-genai` SDK) | Groq (Llama / Qwen with tool calling) |
 | Speech-to-text | Groq hosted Whisper | none required for v1 |
 | Text-to-speech | Google Cloud Text-to-Speech, **Chirp 3 HD** voice | `edge-tts` (free, no key) |
-| Wake word | Global hotkey first (`Win+Alt+V`), then openWakeWord "Hey Vex" (local) | hotkey |
+| Wake word | Global hotkey first (`Ctrl+Alt+V`), then openWakeWord "Hey Vex" (local) | hotkey |
 | Memory | VexMind: built-in linked-notes vault (`VexVault/`), spec in MEMORY_PROMPT.md | — |
 | UI | `ui/orb.html` in a transparent, frameless, always-on-top PySide6 `QWebEngineView` | terminal mode |
 | Web search tool | DuckDuckGo (`ddgs`), Tavily free tier optional | — |

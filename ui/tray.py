@@ -47,7 +47,7 @@ class TrayController(QObject):
     _state_sig = Signal(str)
 
     def __init__(self, app: QApplication, controller, frontend, executor, *, config_path: Path | None = None,
-                 on_quit: Callable[[], None] | None = None, hotkey_text: str = "Win+Alt+V", parent=None):
+                 on_quit: Callable[[], None] | None = None, hotkey_text: str = "Ctrl+Alt+V", parent=None):
         super().__init__(parent)
         self.app = app
         self.controller = controller
@@ -64,6 +64,7 @@ class TrayController(QObject):
         self.status_action = self._add("status", "Vex: Ready", enabled=False)
         self.hotkey_action = self._add("hotkey", f"Hotkey {hotkey_text}", enabled=False)
         self._add("listen", "Listen now", self._listen)
+        self._add("type", "Type a command", self._type_command)
         self.menu.addSeparator()
         self._add("show", "Show Vex", self._toggle_visual, checked=True)
         self._add("mute", "Mute microphone", self._toggle_mic, checked=controller.mic_muted)
@@ -122,6 +123,9 @@ class TrayController(QObject):
 
     def _listen(self) -> None:
         self.controller.start_listening("tray")
+
+    def _type_command(self) -> None:
+        self.controller.start_listening("tray", typed=True)
 
     def _toggle_visual(self, checked: bool) -> None:
         self.visible = checked

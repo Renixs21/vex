@@ -13,7 +13,6 @@ sounddevice                 # mic recording
 soundfile                   # write WAV for STT
 numpy
 webrtcvad-wheels            # voice activity detection (prebuilt for Windows, imports as webrtcvad)
-keyboard                    # global hotkey
 
 # --- UI ---
 PySide6                     # orb window (QWebEngineView) + tray icon
@@ -40,3 +39,7 @@ watchdog                    # re-index when notes are edited by hand
 python-ulid                 # stable note ids
 markdown                    # render notes in the memory viewer (deferred)
 pytest                      # tests
+
+# --- Orb (vex_ui/) ---
+moderngl                    # GPU shader for the marbled orb
+pillow

@@ -314,12 +314,13 @@ def test_build_client_order_attempts_and_models_come_from_config(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "k1")
     monkeypatch.setenv("GROQ_API_KEY", "k2")
     fb = llm.build_client()
-    assert [c.name for c in fb.clients] == ["groq", "gemini"]                      # config: Groq first
+    assert [c.name for c in fb.clients] == ["groq", "groq-small", "gemini"]       # config: big Groq, small Groq, then Gemini
     assert all(c.attempts == 2 and c.fail_over_after == 3.0 for c in fb.clients) and fb.cooldown == 300
     assert fb.clients[0].model == llm.settings["llm"]["groq_model"] != ""
     assert fb.clients[0].reasoning_effort == llm.settings["llm"]["groq_reasoning_effort"]
     monkeypatch.setitem(llm.settings["llm"], "order", ["gemini", "groq"])
     assert [c.name for c in llm.build_client().clients] == ["gemini", "groq"]
+    monkeypatch.setitem(llm.settings["llm"], "order", ["groq", "groq-small", "gemini"])
     monkeypatch.delenv("GROQ_API_KEY")
     solo = llm.build_client().clients[0]
     assert solo.attempts == 4 and solo.fail_over_after == 20.0                     # alone, so be more patient
@@ -331,4 +332,86 @@ def test_provider_without_a_configured_model_is_skipped(monkeypatch, caplog):
     monkeypatch.setitem(llm.settings["llm"], "groq_model", "")
     with caplog.at_level(logging.WARNING):
         fb = llm.build_client()
-    assert [c.name for c in fb.clients] == ["gemini"] and "groq_model is empty" in caplog.text
+    assert [c.name for c in fb.clients] == ["groq-small", "gemini"] and "groq_model is empty" in caplog.text
+
+
+# ---- model ladder and routing -----------------------------------------------------------------------------------------------
+def test_default_ladder_is_big_groq_then_small_groq_then_gemini(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k1")
+    monkeypatch.setenv("GROQ_API_KEY", "k2")
+    fb = llm.build_client()
+    assert [c.name for c in fb.clients] == ["groq", "groq-small", "gemini"]
+    assert [c.model for c in fb.clients[:2]] == [llm.settings["llm"]["groq_model"], llm.settings["llm"]["groq_small_model"]]
+    assert fb.clients[0].model != fb.clients[1].model and fb.clients[1].reasoning_effort == "low"
+
+
+def test_the_two_groq_models_are_separate_providers_with_separate_cooldowns():
+    clock = Clock()
+    big = Client("groq", ApiError(429, message="Rate limit reached ... on tokens per day (TPD). Please try again in 7m51.7s."))
+    small, gem = Client("groq-small"), Client("gemini")
+    fb = FallbackClient([big, small, gem], cooldown=300, clock=clock)
+    assert ask(fb) == "groq-small-ok"                          # big is out of daily tokens: the next Groq model answers
+    clock.t += 100
+    assert ask(fb) == "groq-small-ok" and big.calls == 1       # big stays benched, and for as long as Groq said (471 s)
+    clock.t += 400
+    assert ask(fb) == "groq-ok"
+    assert gem.calls == 0
+
+
+def test_prefer_puts_a_provider_first_for_this_request_only():
+    big, small = Client("groq"), Client("groq-small")
+    fb = FallbackClient([big, small], clock=Clock())
+    assert ask(fb) == "groq-ok"
+    fb.prefer = "groq-small"
+    assert ask(fb) == "groq-small-ok" and big.calls == 1
+    fb.prefer = None
+    assert ask(fb) == "groq-ok"
+
+
+def test_a_failing_preferred_provider_falls_back_to_the_rest_in_order():
+    small = Client("groq-small", ApiError(503))
+    fb = FallbackClient([Client("groq"), small, Client("gemini")], clock=Clock())
+    fb.prefer = "groq-small"
+    assert ask(fb) == "groq-ok"
+    fb.prefer = "groq-small"
+    assert ask(fb) == "groq-ok" and small.calls == 1           # and it is benched for the cooldown
+
+
+def test_prefer_for_a_provider_that_is_not_configured_changes_nothing():
+    fb = FallbackClient([Client("groq"), Client("gemini")], clock=Clock())
+    fb.prefer = "groq-small"
+    assert ask(fb) == "groq-ok"
+
+
+def test_retry_after_understands_groqs_daily_limit_message():
+    e = ApiError(429, message="Rate limit reached for model `openai/gpt-oss-120b` on tokens per day (TPD): Limit 200000, "
+                              "Used 199531, Requested 1389. Please try again in 6m37.44s. Need more tokens?")
+    assert retry_after(e) == pytest.approx(397.44)
+    assert retry_after(ApiError(429, message="Please try again in 38.448s.")) == pytest.approx(38.448)
+
+
+# ---- mixed histories: a call made by Groq, continued by Gemini ----------------------------------------------------------------
+def test_function_calls_from_another_provider_get_gemini_placeholder_signature():
+    from brain.llm import GEMINI_FOREIGN_CALL_SIGNATURE, ToolCall
+
+    g = GeminiClient("gemini-3.5-flash-lite", "k", 5)
+    history = [{"role": "user", "text": "set the volume"},
+               {"role": "assistant", "text": "", "tool_calls": [ToolCall("set_volume", {"level": 20}, id="a"),
+                                                                   ToolCall("mute", {}, id="b")], "raw": None, "raw_provider": "groq"},
+               {"role": "tool", "id": "a", "name": "set_volume", "result": {"ok": True}},
+               {"role": "tool", "id": "b", "name": "mute", "result": {"ok": True}}]
+    contents = g._contents(history)
+    model_parts = contents[1].parts
+    assert [p.function_call.name for p in model_parts] == ["set_volume", "mute"]
+    assert all(p.thought_signature == GEMINI_FOREIGN_CALL_SIGNATURE for p in model_parts)
+    assert len(contents[2].parts) == 2                                       # both results merged into one user turn
+
+
+def test_gemini_calls_keep_their_own_signed_content():
+    from google.genai import types
+
+    g = GeminiClient("gemini-3.5-flash-lite", "k", 5)
+    own = types.Content(role="model", parts=[types.Part(function_call=types.FunctionCall(name="x", args={}), thought_signature=b"real")])
+    contents = g._contents([{"role": "user", "text": "hi"}, {"role": "assistant", "text": "", "tool_calls": [], "raw": own,
+                                                              "raw_provider": "gemini"}])
+    assert contents[1] is own and contents[1].parts[0].thought_signature == b"real"

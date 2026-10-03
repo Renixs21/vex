@@ -37,10 +37,10 @@ def _wrap(res: Result, audit: str | None = None) -> ToolResult:
       {"fact": {"type": "string", "description": "One short fact, e.g. 'Roommate since 2024'"},
        "about": {"type": "string", "description": "Note name, e.g. 'Rahul'; 'me' for the user", "default": ""},
        "note_type": {"type": "string", "enum": ["person", "project", "topic", "place", "preference", "profile"],
-                     "description": "Type, if a new note is created", "default": ""},
+                     "description": "Type, if a new note is created (omit if unsure)"},
        "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tags", "default": []},
        "aliases": {"type": "array", "items": {"type": "string"}, "description": "Other names, e.g. 'my roommate'", "default": []}},
-      audit_args=False)
+      required=["fact"], audit_args=False)         # note_type has no "" default: an enum must only ever see valid values
 def remember(fact: str, about: str = "", note_type: str = "", tags: list[str] | None = None,
              aliases: list[str] | None = None) -> ToolResult:
     res = get_memory().remember(fact, about=about or None, note_type=note_type or None, tags=tags or [],

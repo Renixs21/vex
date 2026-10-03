@@ -13,13 +13,20 @@
   rolling-window rate limiter, Groq reasoning settings, reply filter (`brain/sanitize.py`), admin gating (`safety/elevation.py`),
   empty replies treated as failures. Measurements: docs/BENCHMARKS.md.
 
+- Phase 2 (voice): recorder + VAD, Groq Whisper with usage tracking and typed fallback, TTS chain (Google Chirp 3 HD tested with a
+  fake client, edge-tts live), sentence-pipelined speaker with "read the rest", barge-in, voice yes/no for yellow only, tray
+  "Type a command". See docs/VOICE.md. Model ladder (gpt-oss-120b, gpt-oss-20b, Gemini) with routing of simple commands.
+
+- Orb integrated (docs/ORB.md): `vex_ui/` is started by Vex, driven over UDP, click-to-listen via a second UDP port, pill fallback.
+
 ## Deferred
 | Deferred | Needs | Unblocked by |
 |---|---|---|
 | Voice Confirmer (tray/hotkey/dialog Confirmers exist). A voice Confirmer MUST route `requires_non_voice` requests (every red request and the typed CONFIRM) through hotkey, tray click or typing, never speech; yellow may be voice. The executor already rejects a voice answer to those. | mic, hotkey, tray | Phases 2-3 |
 | Read confirmations aloud (yellow may be answered by voice; red/typed never) | TTS, recorder | Phase 2 |
-| Real microphone capture + STT replacing `ui/capture.TextPromptCapture`, real TTS replacing `SimulatedSpeaker` (use `ui.levels.SoundDevicePlayer`) | recorder, Groq STT, TTS | Phase 2 |
-| Final visual (maybe a separate Godot app): socket transport for `JsonLinesFrontend`, `click` message back to Python | your design choice | later |
+| Google Cloud TTS against the real service (built and tested with a fake client) | your `google-tts-key.json` | when you add it |
+| Voice loop verified with a human voice (V0-V7 in docs/SMOKE_TESTS.md) | you | now |
+| Orb refinements: the orb only gets state/level/caption; a visible indicator for "muted" or "needs approval" would need new protocol fields | your design | later |
 | Wake-word listener: the tray switch and the controller hooks (`on_interaction_start/end`, `on_wakeword_toggle`) already exist | openWakeWord | wake-word task |
 | `memory/curator.py` (post-conversation extraction, inbox, daily summaries) + its tests | the controller's idle hook (exists now) | next |
 | `memory/consolidate.py` nightly job | curator + scheduler | Phase 5 |

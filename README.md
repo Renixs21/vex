@@ -21,9 +21,11 @@ SQLite (`VexVault/.vexmind/index.db`, always rebuildable). No Obsidian needed. S
 
 ## Running Vex
 
-    .\.venv\Scripts\python.exe main.py              # tray icon + floating pill + Win+Alt+V (type instead of speak for now)
+    .\.venv\Scripts\python.exe main.py              # tray icon + floating pill + Ctrl+Alt+V (type instead of speak for now)
     .\.venv\Scripts\python.exe main.py --text       # terminal chat
     ... --dry-run                                     # tools only report what they would do (also a tray toggle)
 
 Approvals for yellow and red actions appear as native dialogs. Manual checks for the hardware-touching tools:
 `docs/SMOKE_TESTS.md`. The visual is behind a small interface (`docs/FRONTEND_PROTOCOL.md`).
+
+The visual is the orb in `vex_ui/` (see `docs/ORB.md`); voice is described in `docs/VOICE.md`.

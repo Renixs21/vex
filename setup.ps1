@@ -135,7 +135,7 @@ mods = [
     "google.cloud.texttospeech", "edge_tts", "sounddevice", "soundfile",
     "numpy", "webrtcvad", "yt_dlp", "send2trash", "psutil", "pycaw",
     "comtypes", "screen_brightness_control", "mss", "pyperclip", "ddgs",
-    "apscheduler", "dateparser", "winotify", "keyboard", "rapidfuzz",
+    "apscheduler", "dateparser", "winotify", "rapidfuzz",
     "win32com.client", "tenacity",
 ]
 bad = []

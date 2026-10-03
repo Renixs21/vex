@@ -36,10 +36,13 @@ class FakeLLM:
         self.systems: list[str] = []
         self.histories: list[list[dict]] = []
         self.tools_seen: list[list[str]] = []          # names of the tools offered at each request
+        self.prefer = None                             # the agent's routing hint (provider to try first)
+        self.prefer_seen: list = []
 
     def generate(self, system, messages, tools):
         self.systems.append(system)
         self.tools_seen.append([t.name for t in tools])
+        self.prefer_seen.append(self.prefer)
         self.histories.append([dict(m) for m in messages])
         step = self.script.pop(0)
         if isinstance(step, str):

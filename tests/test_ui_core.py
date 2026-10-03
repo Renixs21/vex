@@ -359,38 +359,11 @@ class FakeKeyboard:
         self.removed.append(handle)
 
 
-def test_hotkey_registers_and_calls_back_with_the_source():
-    kb = FakeKeyboard()
-    calls = []
-    hk = GlobalHotkey("windows+alt+v", calls.append, keyboard_module=kb)
-    assert hk.start() and hk.active and hk.start()
-    cb, suppress, on_release = kb.registered["windows+alt+v"]
-    assert on_release and not suppress and len(kb.registered) == 1
-    cb()
-    assert calls == ["hotkey"]
-    hk.stop()
-    assert kb.removed == ["handle-windows+alt+v"] and not hk.active
+def test_the_default_hotkey_is_valid_for_win32():
+    from ui.hotkey import parse_hotkey
 
-
-def test_hotkey_failure_is_reported_once_and_does_not_raise():
-    errors = []
-    hk = GlobalHotkey("windows+alt+v", lambda s: None, errors.append, keyboard_module=FakeKeyboard(fail=ImportError("no hook")))
-    assert hk.start() is False and not hk.active
-    assert len(errors) == 1 and "windows+alt+v" in errors[0] and "tray" in errors[0]
-
-
-def test_hotkey_callback_errors_do_not_escape():
-    kb = FakeKeyboard()
-    hk = GlobalHotkey("x", lambda s: 1 / 0, keyboard_module=kb)
-    hk.start()
-    kb.registered["x"][0]()
-
-
-def test_the_default_combo_is_valid_for_the_real_keyboard_library():
-    import keyboard
-
-    assert keyboard.parse_hotkey(config.settings["ui"]["hotkey"])
-    assert config.settings["ui"]["hotkey"] == "windows+alt+v"
+    assert parse_hotkey(config.settings["ui"]["hotkey"])
+    assert config.settings["ui"]["hotkey"] == "ctrl+alt+v"
 
 
 # ---- config persistence --------------------------------------------------------------------------------------------------
