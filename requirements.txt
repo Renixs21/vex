@@ -1,0 +1,42 @@
+# Vex core packages (Python 3.12, Windows)
+
+# --- Brain ---
+google-genai            # Gemini API (free tier via AI Studio key)
+groq                    # Groq: Whisper STT + fallback LLM
+tenacity                # retries with backoff on rate limits
+python-dotenv           # loads .env
+
+# --- Voice ---
+google-cloud-texttospeech   # Google Cloud TTS (Chirp 3 HD)
+edge-tts                    # free TTS fallback
+sounddevice                 # mic recording
+soundfile                   # write WAV for STT
+numpy
+webrtcvad-wheels            # voice activity detection (prebuilt for Windows, imports as webrtcvad)
+keyboard                    # global hotkey
+
+# --- UI ---
+PySide6                     # orb window (QWebEngineView) + tray icon
+
+# --- Tools (Vex's hands) ---
+yt-dlp                      # YouTube search
+send2trash                  # deletes go to the Recycle Bin
+psutil                      # processes, battery, CPU, RAM
+pycaw                       # volume control
+comtypes                    # needed by pycaw
+screen-brightness-control
+mss                         # screenshots
+pyperclip                   # clipboard
+ddgs                        # DuckDuckGo web search
+apscheduler                 # reminders
+dateparser                  # "remind me tomorrow at 5"
+winotify                    # Windows toast notifications
+rapidfuzz                   # fuzzy app-name matching
+pywin32                     # resolve Start Menu shortcuts
+
+# --- Memory (VexMind) ---
+python-frontmatter          # note frontmatter
+watchdog                    # re-index when notes are edited by hand
+python-ulid                 # stable note ids
+markdown                    # render notes in the memory viewer (deferred)
+pytest                      # tests

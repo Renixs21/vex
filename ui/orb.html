@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vex Orb</title>
+<style>
+  :root { --bg:#f3f2f0; --ring:rgba(228,223,215,.9); --hint:#8a8580; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0e0d0c; --ring:rgba(60,55,50,.6); --hint:#6b6560; }
+  }
+  html, body { margin:0; height:100%; background:var(--bg); overflow:hidden; }
+  body.transparent { background:transparent; }
+  canvas { position:fixed; inset:0; width:100%; height:100%; display:block; }
+  #hint {
+    position:fixed; bottom:16px; left:16px; right:16px; text-align:center;
+    font:13px/1.4 system-ui, sans-serif; color:var(--hint);
+    transition:opacity 1.2s; pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">Hold <b>Space</b> to simulate Vex speaking &middot; <b>T</b> thinking &middot; <b>M</b> mic</div>
+
+<script>
+(() => {
+  // ---------- setup ----------
+  const params = new URLSearchParams(location.search);
+  const transparent = params.has('transparent');
+  if (transparent) document.body.classList.add('transparent');
+  const hint = document.getElementById('hint');
+  if (transparent || params.has('nohint')) hint.remove();
+  else setTimeout(() => (hint.style.opacity = 0), 7000);
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  addEventListener('resize', resize); resize();
+
+  // Low-res offscreen field: drawing small and scaling up gives a natural soft blur.
+  const N = 180;
+  const off = document.createElement('canvas'); off.width = off.height = N;
+  const g = off.getContext('2d');
+
+  // Film grain tile
+  const grain = document.createElement('canvas'); grain.width = grain.height = 256;
+  (() => {
+    const gc = grain.getContext('2d'), img = gc.createImageData(256, 256);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const v = Math.random() * 255;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255;
+    }
+    gc.putImageData(img, 0, 0);
+  })();
+  const grainPattern = ctx.createPattern(grain, 'repeat');
+
+  // Color blobs: c = rgb, r = radius (fraction of field), ox/oy = base offset,
+  // amp = drift distance, fx/fy = drift speed, p = phase, k = how much it swells with voice
+  const blobs = [
+    { c:'92,28,18',   a:.95, r:.75, ox:-.08, oy: .05, amp:.06, fx:.31, fy:.27, p:0.0, k:.15 },
+    { c:'188,62,40',  a:.95, r:.48, ox:-.20, oy: .10, amp:.09, fx:.43, fy:.37, p:1.2, k:.35 },
+    { c:'242,112,82', a:.75, r:.28, ox:-.06, oy: .30, amp:.12, fx:.57, fy:.49, p:2.4, k:.55, mode:'screen' },
+    { c:'6,3,3',      a:.95, r:.52, ox: .30, oy:-.26, amp:.07, fx:.23, fy:.29, p:3.1, k:-.25 },
+    { c:'150,156,246',a:.85, r:.34, ox:-.44, oy: .18, amp:.05, fx:.37, fy:.41, p:4.0, k:.30, mode:'screen' },
+    { c:'164,150,240',a:.65, r:.26, ox: .02, oy: .50, amp:.06, fx:.33, fy:.45, p:5.3, k:.40, mode:'screen' },
+    { c:'246,222,236',a:.55, r:.20, ox:-.36, oy:-.36, amp:.05, fx:.29, fy:.35, p:0.7, k:.20, mode:'screen' },
+  ];
+
+  function paintField(t, energy) {
+    g.globalCompositeOperation = 'source-over';
+    g.fillStyle = '#170806';
+    g.fillRect(0, 0, N, N);
+    for (const b of blobs) {
+      const drift = b.amp * (1 + energy * 0.8);
+      const x = N * (0.5 + b.ox + drift * Math.sin(t * b.fx + b.p));
+      const y = N * (0.5 + b.oy + drift * Math.cos(t * b.fy + b.p * 1.3));
+      const rad = Math.max(1, N * b.r * (1 + energy * b.k));
+      const grd = g.createRadialGradient(x, y, 0, x, y, rad);
+      grd.addColorStop(0, `rgba(${b.c},${b.a})`);
+      grd.addColorStop(0.55, `rgba(${b.c},${b.a * 0.45})`);
+      grd.addColorStop(1, `rgba(${b.c},0)`);
+      g.globalCompositeOperation = b.mode || 'source-over';
+      g.fillStyle = grd;
+      g.fillRect(0, 0, N, N);
+    }
+  }
+
+  // ---------- state & audio level ----------
+  let state = 'idle';            // idle | listening | thinking | speaking
+  let level = 0;                 // smoothed 0..1
+  let simSpeaking = false;
+  let externalLevel = 0, externalStamp = 0;
+  let analyser = null, analyserBuf = null, analyserGain = 4;
+  let audioCtx = null, micStream = null;
+
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+
+  function analyserLevel() {
+    if (!analyser) return 0;
+    analyser.getFloatTimeDomainData(analyserBuf);
+    let s = 0;
+    for (let i = 0; i < analyserBuf.length; i++) s += analyserBuf[i] * analyserBuf[i];
+    return Math.min(1, Math.sqrt(s / analyserBuf.length) * analyserGain);
+  }
+
+  // Fake speech envelope for testing: syllable-like bursts
+  function simLevel(t) {
+    const syll = Math.max(0, Math.sin(t * 9.3) * 0.6 + Math.sin(t * 4.1 + 1) * 0.4);
+    const phrase = 0.55 + 0.45 * Math.sin(t * 0.9);
+    return Math.min(1, syll * phrase + Math.random() * 0.08);
+  }
+
+  function targetLevel(now, t) {
+    if (now - externalStamp < 250) return externalLevel;
+    if (analyser) return analyserLevel();
+    if (simSpeaking) return simLevel(t);
+    return 0;
+  }
+
+  // ---------- render loop ----------
+  let last = performance.now(), clock = 0, spin = 0, glow = 0, scaleS = 1;
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+
+    const tgt = targetLevel(now, now / 1000);
+    const rate = tgt > level ? 20 : 5;               // fast attack, slow release
+    level += (tgt - level) * Math.min(1, dt * rate);
+
+    let speed, scaleT, glowT;
+    const tt = now / 1000;
+    switch (state) {
+      case 'speaking':
+        speed = 0.35 + level * 1.4;
+        scaleT = 1.0 + level * 0.09;
+        glowT = 0.25 + level * 0.75;
+        break;
+      case 'thinking':
+        speed = 1.1;
+        scaleT = 1.0 + 0.018 * Math.sin(tt * 4.5);
+        glowT = 0.3 + 0.15 * Math.sin(tt * 4.5);
+        break;
+      case 'listening':
+        speed = 0.3 + level * 0.6;
+        scaleT = 1.015 + level * 0.04;
+        glowT = 0.15 + level * 0.4;
+        break;
+      default:
+        speed = 0.18;
+        scaleT = 1.0 + 0.012 * Math.sin(tt * 1.2);
+        glowT = 0.05;
+    }
+    scaleS += (scaleT - scaleS) * Math.min(1, dt * 14);
+    glow += (glowT - glow) * Math.min(1, dt * 6);
+    clock += dt * speed * 2.2;
+    spin += dt * speed * 0.25;
+
+    const energy = state === 'thinking' ? 0.35 : level;
+    paintField(clock, energy);
+
+    ctx.clearRect(0, 0, W, H);
+    const cx = W / 2, cy = H / 2;
+    const R = Math.min(W, H) * 0.34 * scaleS;
+
+    // outer glow
+    if (glow > 0.02) {
+      const gr = ctx.createRadialGradient(cx, cy, R * 0.9, cx, cy, R * (1.35 + glow * 0.25));
+      gr.addColorStop(0, `rgba(226,96,66,${0.32 * glow})`);
+      gr.addColorStop(0.5, `rgba(150,140,240,${0.12 * glow})`);
+      gr.addColorStop(1, 'rgba(150,140,240,0)');
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.arc(cx, cy, R * 1.7, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // soft rim
+    if (!transparent) {
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--ring');
+      ctx.beginPath(); ctx.arc(cx, cy, R * 1.025, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // the orb
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.clip();
+    ctx.translate(cx, cy); ctx.rotate(spin);
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    const S = R * 1.45; // oversize so rotation never shows corners
+    ctx.drawImage(off, -S, -S, S * 2, S * 2);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    // grain
+    ctx.globalAlpha = 0.09;
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.translate((Math.random() * 256) | 0, (Math.random() * 256) | 0);
+    ctx.fillStyle = grainPattern;
+    ctx.fillRect(-256, -256, W + 512, H + 512);
+    ctx.restore();
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // ---------- public API (call these from Vex) ----------
+  function setState(s) {
+    if (!['idle', 'listening', 'thinking', 'speaking'].includes(s)) return;
+    state = s;
+  }
+
+  // Push a live level 0..1 (e.g. RMS from Python while it plays TTS audio)
+  function setLevel(v) {
+    externalLevel = Math.max(0, Math.min(1, +v || 0));
+    externalStamp = performance.now();
+  }
+
+  // Play TTS audio in the page; the orb reacts to it automatically
+  function playAudio(url) {
+    stopMic();
+    const ac = getAudioCtx();
+    const el = new Audio(url);
+    el.crossOrigin = 'anonymous';
+    const src = ac.createMediaElementSource(el);
+    const an = ac.createAnalyser(); an.fftSize = 1024;
+    src.connect(an); an.connect(ac.destination);
+    analyser = an; analyserBuf = new Float32Array(an.fftSize); analyserGain = 4;
+    setState('speaking');
+    return new Promise((resolve, reject) => {
+      el.onended = () => { analyser = null; setState('idle'); resolve(); };
+      el.onerror = (e) => { analyser = null; setState('idle'); reject(e); };
+      el.play().catch((e) => { analyser = null; setState('idle'); reject(e); });
+    });
+  }
+
+  async function startMic() {
+    const ac = getAudioCtx();
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const src = ac.createMediaStreamSource(micStream);
+    const an = ac.createAnalyser(); an.fftSize = 1024;
+    src.connect(an);
+    analyser = an; analyserBuf = new Float32Array(an.fftSize); analyserGain = 6;
+    setState('listening');
+  }
+  function stopMic() {
+    if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
+    if (state === 'listening') { analyser = null; setState('idle'); }
+  }
+
+  window.vex = { setState, setLevel, playAudio, startMic, stopMic };
+
+  // ---------- test controls ----------
+  addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && !e.repeat) { e.preventDefault(); simSpeaking = true; setState('speaking'); }
+    if (e.code === 'KeyT' && !e.repeat) setState(state === 'thinking' ? 'idle' : 'thinking');
+    if (e.code === 'KeyM' && !e.repeat) {
+      if (micStream) stopMic(); else startMic().catch(() => {});
+    }
+  });
+  addEventListener('keyup', (e) => {
+    if (e.code === 'Space') { simSpeaking = false; setState('idle'); }
+  });
+})();
+</script>
+</body>
+</html>

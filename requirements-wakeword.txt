@@ -1,0 +1,3 @@
+# Wake word (Phase 5) - local, free, no API key
+openwakeword
+onnxruntime

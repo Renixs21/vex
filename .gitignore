@@ -1,0 +1,13 @@
+.env
+.venv/
+logs/
+__pycache__/
+*.pyc
+dist/
+build/
+google-tts-key.json
+data/
+VexVault/
+.pytest_cache/
+*.onnx
+*.tmp

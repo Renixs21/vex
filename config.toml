@@ -1,0 +1,27 @@
+[llm]
+order = ["groq", "gemini"]             # providers in preference order (Gemini free tier: ~20 requests/day per model)
+gemini_model = "gemini-3.5-flash-lite" # each Gemini model has its own free quota; "-latest" aliases and 2.5-flash ran out fast
+groq_model = "openai/gpt-oss-120b"
+gemini_rpm = 5                         # client-side limit: free tier allows 5 requests/minute
+groq_rpm = 25
+groq_reasoning_effort = "low"          # gpt-oss models: short thinking, and none of it leaked into replies
+tool_groups = true                     # send a small core tool set + the groups a message needs (false = all 38 tools every time)
+max_steps = 8
+failover_attempts = 2                  # tries per provider on 429/5xx before switching to the fallback
+failover_cooldown = 300                # seconds to stay on the fallback before trying the primary again
+
+[paths]
+vault = "VexVault"
+logs = "logs"
+
+[safety]
+extra_safe_folders = []                # more folders where file tools run without asking (green)
+confirm_timeout = 30                   # seconds to answer a y/n confirmation; no answer = no
+typed_timeout = 60                     # seconds to type CONFIRM for catastrophic commands
+
+[ui]
+hotkey = "windows+alt+v"             # global hotkey: start listening, or stop speaking and listen
+caption_seconds = 8                  # how long the pill keeps showing the last caption once idle
+
+[wakeword]
+enabled = true                       # tray toggle; the wake-word listener itself comes in a later phase

@@ -1,0 +1,94 @@
+"""Tool groups. Sending all 37 tool definitions with every request cost ~2,500 tokens and tripped the free-tier rate
+limits, so the LLM is offered a small core set plus only the groups that look relevant:
+
+  * core (always): open_app, play_youtube, web_search, recall, remember, more_tools
+  * a group is added when the user's message matches its keywords,
+  * or when the model calls more_tools(category),
+  * and a group used in the previous turn stays on for the next one ("yes" after "retry as administrator?").
+
+The agent only lets the model call tools it was offered this step; anything else is told to use more_tools.
+"""
+from __future__ import annotations
+
+import re
+
+from tools import registry
+
+CORE = ("open_app", "play_youtube", "web_search", "recall", "remember", "more_tools")
+
+CATEGORIES: dict[str, dict] = {
+    "files": {
+        "tools": ["create_file", "read_file", "list_dir", "move_file", "copy_file", "delete_file", "undo_last"],
+        "summary": "create, read, list, move, copy, delete files and folders; undo",
+        "keywords": ["file", "files", "folder", "folders", "directory", "document", "documents", "desktop", "downloads",
+                     "rename", "move", "copy", "delete", "trash", "recycle", "undo", "txt", "bat", "cmd", "ps1", "script"],
+    },
+    "apps": {
+        "tools": ["close_app", "install_app", "uninstall_app"],
+        "summary": "close, install, uninstall apps",
+        "keywords": ["install", "uninstall", "close", "quit", "app", "apps", "application", "program", "winget", "update"],
+    },
+    "media": {
+        "tools": ["media_control"],
+        "summary": "play/pause, next, previous, stop",
+        "keywords": ["pause", "resume", "next", "previous", "skip", "song", "songs", "music", "track", "playlist", "stop the"],
+    },
+    "tasks": {
+        "tools": ["add_task", "list_tasks", "complete_task", "set_reminder"],
+        "summary": "to-do list and reminders",
+        "keywords": ["task", "tasks", "todo", "to-do", "to do", "remind", "reminder", "reminders", "checklist", "due"],
+    },
+    "system": {
+        "tools": ["set_volume", "mute", "set_brightness", "screenshot", "get_clipboard", "set_clipboard", "system_info", "lock_pc"],
+        "summary": "volume, brightness, screenshot, clipboard, system info, lock",
+        "keywords": ["volume", "mute", "unmute", "louder", "quieter", "sound", "brightness", "dim", "brighter", "screenshot",
+                     "screenshots", "screen shot", "clipboard", "battery", "cpu", "ram", "disk", "storage", "system", "lock"],
+    },
+    "memory": {
+        "tools": ["read_note", "link_notes", "list_notes", "forget", "memory_stats"],
+        "summary": "read, link, list, forget notes in memory",
+        "keywords": ["forget", "memory", "memories", "my notes", "what do you know", "remember about"],
+    },
+    "shell": {
+        "tools": ["run_powershell", "shutdown_pc", "restart_pc", "cancel_shutdown"],
+        "summary": "PowerShell, shutdown, restart",
+        "keywords": ["powershell", "shell", "command", "terminal", "cmd", "run", "execute", "shutdown", "shut down", "restart",
+                     "reboot", "power off", "admin", "administrator", "elevated", "process", "service", "registry", "ipconfig",
+                     "ping", "retry", "again"],
+    },
+}
+
+_PATTERNS = {name: re.compile(r"(?<![\w])(?:" + "|".join(re.escape(k) for k in spec["keywords"]) + r")(?![\w])", re.I)
+             for name, spec in CATEGORIES.items()}
+
+
+def match(text: str) -> set[str]:
+    """Categories whose keywords appear in the user's message."""
+    return {name for name, rx in _PATTERNS.items() if rx.search(text or "")}
+
+
+def category_summary() -> str:
+    return "; ".join(f"{n} ({s['summary']})" for n, s in CATEGORIES.items())
+
+
+def apply() -> None:
+    """Stamp each registered tool with its category (called once all tool modules are loaded)."""
+    for name, spec in CATEGORIES.items():
+        for tool_name in spec["tools"]:
+            t = registry.get(tool_name)
+            if t is not None:
+                t.category = name
+    for tool_name in CORE:
+        t = registry.get(tool_name)
+        if t is not None:
+            t.category = "core"
+
+
+@registry.tool("more_tools", "Get more tools by category: " + ", ".join(CATEGORIES) + ".",
+               {"category": {"type": "string", "enum": list(CATEGORIES), "description": "Tool group"}},
+               describe=lambda a: f"Offer the {a['category']} tools")
+def more_tools(category: str) -> registry.ToolResult:
+    spec = CATEGORIES.get(category)
+    if spec is None:
+        return registry.ToolResult(False, f"Unknown category '{category}'. Use one of: {', '.join(CATEGORIES)}.")
+    return registry.ToolResult(True, f"Added the {category} tools: {', '.join(spec['tools'])}.", {"category": category})
