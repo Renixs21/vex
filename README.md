@@ -33,3 +33,4 @@ The visual is the orb in `vex_ui/` (see `docs/ORB.md`); voice is described in `d
 Say "Hey Jarvis" (the built-in fallback) or, once you've trained it, "Hey Vex": see `docs/WAKEWORD.md`. Run `python main.py --console` to watch every stage in the terminal.
 
 Starting with Windows, crash recovery, the mute icon: see `docs/STARTUP.md`.
+Health check (is every part working?): `python tools_dev\health.py` or tray > Health check; see `docs/HEALTH.md`.

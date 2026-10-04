@@ -113,6 +113,36 @@ class ConfirmTracker:
         return getattr(self.inner, name)
 
 
+def app_status(controller, hotkey, wake, orb, tray) -> dict:
+    """What the running Vex is doing, for the heartbeat and the health check. Never raises."""
+    from tools import reminders
+
+    def safe(fn, default=None):
+        try:
+            return fn()
+        except Exception:  # noqa: BLE001
+            return default
+
+    wake_on = safe(lambda: tray.actions["wakeword"].isChecked(), False)
+    if wake is None or not wake_on:
+        wake_state = "off"
+    else:
+        alive = safe(lambda: wake._thread is not None and wake._thread.is_alive(), False)
+        wake_state = "running" if alive and getattr(wake, "running", False) else ("starting" if alive else "down")
+    if orb is None:
+        orb_state = "pill"
+    elif safe(lambda: orb.watcher.gave_up, False):
+        orb_state = "pill"
+    elif not getattr(orb, "started_by_us", True):
+        orb_state = "external"
+    else:
+        orb_state = "crashed" if safe(orb.crashed, False) else "running"
+    sched = getattr(reminders, "_scheduler", None)
+    return {"state": controller.state, "hotkey": bool(safe(lambda: hotkey.active, False)), "wakeword": wake_state, "orb": orb_state,
+            "mic_muted": bool(controller.mic_muted), "followup": bool(getattr(controller, "followup_enabled", False)),
+            "reminders": bool(sched is not None and getattr(sched, "running", False))}
+
+
 QUIET_SECONDS = 90.0
 WATCHDOG_SECONDS = 30
 MAX_RESTARTS = 3
@@ -358,8 +388,28 @@ def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: in
 
         controller.on_mute_change.append(on_mute_change)
     watches = build_watches(hotkey, hotkey_ok, wake, tray, controller)
+    from ui import health
+
+    heartbeat_path = config.ROOT / "data" / "status.json"
+
+    def status() -> dict:
+        return app_status(controller, hotkey, wake, orb, tray)
+
+    def tick() -> None:
+        for w in watches:
+            w.check()
+        health.write_heartbeat(heartbeat_path, status())            # the health check (and you) can see what the running Vex is doing
+
+    def run_health() -> tuple[str, str]:
+        checks = health.run_checks(status=status())
+        text = health.render(checks, False, health.Redactor(health.secrets_from_env(config.ROOT)))
+        path = health.write_report(text, config.ROOT / config.settings["paths"]["logs"] / "health.txt")
+        return health.summary_line(checks), str(path)
+
+    tray.on_health = run_health
     watchdog = QTimer()
-    watchdog.timeout.connect(lambda: [w.check() for w in watches])
+    watchdog.timeout.connect(tick)
+    QTimer.singleShot(3000, lambda: health.write_heartbeat(heartbeat_path, status()))
     watchdog.start(WATCHDOG_SECONDS * 1000)
     holder["watchdog"] = watchdog
     from ui import autostart

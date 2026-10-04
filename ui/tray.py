@@ -60,6 +60,7 @@ def make_icon(muted: bool = False) -> QIcon:
 
 class TrayController(QObject):
     _state_sig = Signal(str)
+    _health_sig = Signal(str, str)                                  # (summary, report path) from the health check thread
 
     def __init__(self, app: QApplication, controller, frontend, executor, *, config_path: Path | None = None,
                  on_quit: Callable[[], None] | None = None, hotkey_text: str = "Ctrl+Alt+V", parent=None, autostart_api=None):
@@ -71,6 +72,8 @@ class TrayController(QObject):
         self.config_path = config_path
         self.on_quit = on_quit
         self.on_open_memory: Callable[[], None] | None = None       # set by the app: opens the memory viewer window
+        self.on_health: Callable[[], tuple[str, str]] | None = None  # set by the app: runs the health check, returns (summary, report path)
+        self._health_running = False
         self.visible = True
         self.quiet_until = 0.0                                      # monotonic time; until then ordinary notifications are only logged
         if autostart_api is None:
@@ -96,6 +99,7 @@ class TrayController(QObject):
         self._add("autostart", "Start with Windows", self._toggle_autostart, checked=self._autostart_on())
         self._add("dry_run", "Dry run (change nothing)", self._toggle_dry_run, checked=bool(executor.dry_run))
         self.menu.addSeparator()
+        self._add("health", "Health check", self._health)
         self._add("memory", "Open memory", self._open_memory)
         self._add("logs", "Open logs", self._open_logs)
         self.menu.addSeparator()
@@ -105,6 +109,7 @@ class TrayController(QObject):
         self.tray.setToolTip("Vex")
         self.tray.activated.connect(self._activated)
         self._state_sig.connect(self._on_state)
+        self._health_sig.connect(self._health_done)
         controller.listeners.append(self._state_sig.emit)       # states arrive from worker threads; the signal marshals
 
     # ---- construction helpers --------------------------------------------------------------------------------------------
@@ -250,6 +255,31 @@ class TrayController(QObject):
                 log.exception("memory viewer failed")
                 self.notify("Memory", "The memory viewer couldn't open. Opening the notes folder instead.")
         self._open_path(config.ROOT / config.settings["paths"]["vault"])
+
+    def _health(self) -> None:
+        """Run the free health check in the background; a toast with the verdict, then the report opens."""
+        if self.on_health is None or self._health_running:
+            return
+        self._health_running = True
+        self.notify("Health check", "Checking every part of Vex (about 10 seconds, no API quota used)…", force=True)
+
+        def work() -> None:
+            try:
+                summary, path = self.on_health()
+            except Exception as e:  # noqa: BLE001
+                log.exception("health check failed")
+                summary, path = f"The health check itself failed: {type(e).__name__}", ""
+            self._health_sig.emit(summary, path)
+
+        import threading
+
+        threading.Thread(target=work, name="health-check", daemon=True).start()
+
+    def _health_done(self, summary: str, path: str) -> None:
+        self._health_running = False
+        self.notify("Health check", summary + (" Report: logs\\health.txt" if path else ""), force=True)
+        if path:
+            self._open_path(Path(path))
 
     def _open_logs(self) -> None:
         self._open_path(config.ROOT / config.settings["paths"]["logs"])
