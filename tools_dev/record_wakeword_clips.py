@@ -103,8 +103,11 @@ def main() -> int:
             audio = sd.rec(int(RATE * secs), samplerate=RATE, channels=1, dtype="int16", device=device)
             sd.wait()
             peak = int(np.abs(audio).max())
-            save_wav(folder / f"{name}_{args.set}_{n:03d}.wav", audio.ravel())
-            level = "  (very quiet: check the mic)" if peak < 300 and name not in ("neg_silence",) else ""
+            k = n
+            while (folder / f"{name}_{args.set}_{k:03d}.wav").exists():          # never overwrite an earlier clip
+                k += 1
+            save_wav(folder / f"{name}_{args.set}_{k:03d}.wav", audio.ravel())
+            level = "  (NO VOICE HEARD: speak right after the beep)" if peak < 300 and name in ("pos", "neg_speech", "neg_talk") else ""
             print(f"  ok, peak {peak}{level}")
         print(f"[{name}] done")
     print(f"\nAll done. Clips are in {out}")
