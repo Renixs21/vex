@@ -11,6 +11,7 @@ import time
 from datetime import datetime
 from typing import Callable
 
+from voice.micstate import default_mic_muted
 from voice.recorder import NEAR_SILENT_RMS, MicUnavailable, Recorder
 from voice.stt import GroqWhisper, SttLimitReached, SttUnavailable
 
@@ -41,12 +42,17 @@ class VoiceCapture:
             return self._typed("mic", "Vex can't use the microphone. Check Windows Settings > Privacy > Microphone "
                                       "(allow desktop apps). Type your command instead.")
         if rec.peak_rms < NEAR_SILENT_RMS and rec.reason != "cancelled":
-            log.warning("mic is near-silent (RMS %.1f): nothing louder than this was heard", rec.peak_rms)
-            if not self._told_near_silent and self.notify:                           # tell the user, once per run
-                self._told_near_silent = True
+            muted = default_mic_muted()
+            log.warning("mic is near-silent (RMS %.1f): nothing louder than this was heard%s", rec.peak_rms,
+                        "; WINDOWS HAS THE MICROPHONE MUTED" if muted else "")
+            if (muted or not self._told_near_silent) and self.notify and self._clock() - self._noticed.get("silent", -1e9) > 60:
+                self._told_near_silent = True                                        # a muted mic is told every minute, not once
+                self._noticed["silent"] = self._clock()
                 try:
-                    self.notify("Vex can't hear you", f"The microphone is almost silent (RMS {rec.peak_rms:.1f}). Check that it isn't muted, "
-                                "its volume in Windows Sound settings, or Settings > Privacy > Microphone. You can also type instead.")
+                    why = ("Windows has the microphone muted (unmute it in Settings > System > Sound > Input, or the laptop's mic key)."
+                           if muted else "Check that it isn't muted, its volume in Windows Sound settings, or Settings > Privacy > "
+                                         "Microphone.")
+                    self.notify("Vex can't hear you", f"The microphone is almost silent (RMS {rec.peak_rms:.1f}). {why} You can also type instead.")
                 except Exception:  # noqa: BLE001
                     log.debug("notify failed", exc_info=True)
         if rec.reason == "cancelled" or self._cancel.is_set():

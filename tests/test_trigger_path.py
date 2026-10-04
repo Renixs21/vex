@@ -98,8 +98,11 @@ def test_rms_to_level_is_visible_for_normal_speech():
     assert rms_to_level(0) == 0 and rms_to_level(300) > 0.25 and rms_to_level(10000) == 1.0
 
 
-def test_near_silent_recording_is_logged_and_told_once(caplog):
+def test_near_silent_recording_is_logged_and_told_once(caplog, monkeypatch):
+    import voice.capture
     from voice.capture import VoiceCapture
+
+    monkeypatch.setattr(voice.capture, "default_mic_muted", lambda: False)
 
     rec = Recording(audio=np.zeros(16000, dtype=np.int16), seconds=1.0, speech_seconds=0.5, reason="speech", peak_rms=2.0)
     notes = []
@@ -111,6 +114,21 @@ def test_near_silent_recording_is_logged_and_told_once(caplog):
     assert len(notes) == 1 and "almost silent" in notes[0]
     assert sum("mic is near-silent" in r.message for r in caplog.records) == 2
     assert any("speech recognition result: 'hello'" in r.message for r in caplog.records)
+
+
+def test_a_muted_windows_microphone_is_named_as_the_cause(caplog, monkeypatch):
+    import voice.capture
+    from voice.capture import VoiceCapture
+
+    monkeypatch.setattr(voice.capture, "default_mic_muted", lambda: True)
+    rec = Recording(audio=np.zeros(16000, dtype=np.int16), seconds=1.0, speech_seconds=0.0, reason="no_speech", peak_rms=0.5)
+    notes = []
+    cap = VoiceCapture(SimpleNamespace(record=lambda cancel: rec), SimpleNamespace(available=True, transcribe=lambda a: "x"),
+                       notify=lambda title, m: notes.append(m))
+    with caplog.at_level(logging.WARNING):
+        cap()
+    assert len(notes) == 1 and "muted" in notes[0]
+    assert any("WINDOWS HAS THE MICROPHONE MUTED" in r.message for r in caplog.records)
 
 
 # ---- click-back logging --------------------------------------------------------------------------------------------------------------

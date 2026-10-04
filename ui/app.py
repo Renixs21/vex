@@ -96,6 +96,10 @@ def startup_summary(parts: dict, hotkey_text: str, console: bool) -> list[str]:
     if stack is not None:
         providers = [p.name + ("" if p.available() else " (not configured)") for p in stack.chain.providers]
         mic = stack.recorder.device or "default microphone"
+        from voice.micstate import default_mic_muted
+        if default_mic_muted():
+            mic += " (MUTED in Windows: unmute it or Vex won't hear you)"
+            log.warning("the Windows default microphone is muted")
         lines.append(f"  Voice: on | mic: {mic} | speech recognition: Groq {stack.stt.model} ({'ready' if stack.stt.available else 'NO KEY'}) "
                      f"| speech: {', '.join(providers)}")
     else:
