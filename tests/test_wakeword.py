@@ -462,3 +462,20 @@ def test_take_audio_includes_frames_still_queued(rig):
     mic.push(6, value=321)
     audio = l.take_audio()                                       # asked for immediately, before the listener thread moved them
     assert audio is not None and len(audio) >= 4 * FRAME
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("raw,clean", [
+    ("Have x.", ""), ("Havix,", ""), ("Hey Vex, open notepad", "open notepad"), ("hey x what's the time", "what's the time"),
+    ("Ex, play lofi", "play lofi"), ("backs open chrome", "open chrome"), ("Hey becks", ""), ("wex", ""), ("Hey vecs.", ""),
+    ("Havix open notepad", "open notepad"), ("heyvex play", "play"), ("VEX!", "")])
+def test_whisper_mishearings_of_the_wake_phrase_are_stripped(raw, clean):
+    assert strip_wake_phrase(raw) == clean
+
+
+@pytest.mark.parametrize("text", ["vexillology is fun", "open notepad", "next song", "text mom", "Heavy metal", "Having fun",
+                                  "Hexagon is a shape", "Hello world", "vet appointment", "Have a nice day", "tell hey vex jokes"])
+def test_ordinary_requests_are_not_mistaken_for_the_wake_phrase(text):
+    assert strip_wake_phrase(text) == text

@@ -200,7 +200,10 @@ class VexController:
                 self._active_capture = self.typed_capture if mode == "typed" else self.capture
                 text = self._active_capture()
                 if text and mode != "typed":
+                    raw = text
                     text = strip_wake_phrase(text)                       # "Hey Vex, open notepad" -> "open notepad"
+                    if text != raw.strip():
+                        log.info("wake phrase in transcript: %r -> %r", raw, text)
             if not text or not text.strip() or self._shutdown:
                 self.frontend.show_caption("")
                 return

@@ -53,7 +53,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "preroll_ms": 500,
         "stt_model": "whisper-large-v3-turbo",
         "language": "en",                # "" = let Whisper detect the language (Hindi, Kannada...)
-        "stt_prompt": "Vex, a voice assistant on Windows. Commands such as open Notepad or set the volume.",
+        "stt_prompt": "Hey Vex. Vex, open Notepad. Hey Vex, set the volume.",
         "stt_seconds_per_hour": 7200,    # Groq's free Whisper allowance; checked locally so we fail to typing early
         "tts_order": ["google", "edge"],
         "google_voice": "en-US-Chirp3-HD-Aoede",

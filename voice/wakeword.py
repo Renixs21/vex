@@ -20,6 +20,7 @@ How the pieces fit
 """
 from __future__ import annotations
 
+import difflib
 import logging
 import queue
 import re
@@ -69,12 +70,48 @@ def play_chime(sd_module=None, blocking: bool = True) -> None:
         log.debug("chime failed: %s", e)
 
 
-_WAKE_PREFIX = re.compile(r"^\s*(?:(?:hey|hi|ok|okay)[\s,.!-]+)?(?:vex|jarvis|vecs|vax)\b[\s,.!?:;-]*", re.IGNORECASE)
+# Whisper hears "Vex" as many things: "x", "ex", "vecs", "wex", "backs", "Have x", "Havix"...
+GREETINGS = {"hey", "hi", "ok", "okay", "hay", "hei", "a", "eh", "he", "hate", "have", "ay"}
+WAKE_VARIANTS = {"vex", "x", "ex", "vecs", "vecks", "wex", "backs", "becks", "vax", "vix", "vexx", "vexs", "vez", "jarvis", "vegs", "veks"}
+FUZZY_RATIO = 0.7
+FUSED = {"havix", "heyvex", "hayvex", "hevex", "heyvecs", "havex", "hayvecs", "heyvecks", "havecs", "heyx", "heyex"}
+
+
+def _tokens(text: str) -> list[tuple[str, int]]:
+    """(lowercase word, end offset in text) for each word, punctuation ignored."""
+    return [(m.group(0).lower(), m.end()) for m in re.finditer(r"[A-Za-z']+", text or "")]
+
+
+def _is_wake_word(word: str) -> bool:
+    return word in WAKE_VARIANTS or (len(word) >= 3 and difflib.SequenceMatcher(None, word, "vex").ratio() >= FUZZY_RATIO
+                                     and word not in {"vet", "ten", "yes", "web", "fix", "six", "text", "next", "vector", "flex"})
+
+
+def wake_phrase_end(text: str) -> int:
+    """Offset just after a leading wake phrase ('Hey Vex', 'Have x', 'Havix', 'Vex', 'X', 'hey ex'), or 0 if there is none."""
+    words = _tokens(text)
+    if not words:
+        return 0
+    first, end1 = words[0]
+    if len(words) > 1 and first in GREETINGS and _is_wake_word(words[1][0]):          # "hey vex", "have x"
+        return words[1][1]
+    if _is_wake_word(first):                                                         # "vex", "x"
+        return end1
+    if first in FUSED:                                                               # "havix", "heyvecs"
+        return end1
+    return 0
 
 
 def strip_wake_phrase(text: str) -> str:
-    """'Hey Vex, open notepad' -> 'open notepad'. Only strips the phrase at the very start."""
-    return _WAKE_PREFIX.sub("", text or "", count=1).strip()
+    """'Hey Vex, open notepad' -> 'open notepad'. Only strips the phrase at the very start, and tolerates how Whisper mishears it."""
+    text = text or ""
+    end = wake_phrase_end(text)
+    if not end:
+        return text.strip()
+    rest = text[end:]
+    if rest[:1].isalnum():                                  # "vexillology": the match was only the start of a longer word
+        return text.strip()
+    return rest.lstrip(" 	,.!?:;-").strip()
 
 
 def label_for(model: str) -> str:
