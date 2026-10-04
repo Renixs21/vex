@@ -128,7 +128,7 @@ def test_a_group_used_last_turn_stays_on_for_the_next_message(make_agent):
 def test_more_tools_adds_a_group_for_the_rest_of_the_turn(make_agent):
     llm = FakeLLM([("more_tools", {"category": "tasks"})], [("list_tasks", {})], "No open tasks.")
     agent, ex = make_agent(llm)
-    agent.run("what's on my agenda")                                      # no keyword matched, so the model asks for the group
+    agent.run("anything pending for me")                                      # no keyword matched, so the model asks for the group
     assert "list_tasks" not in llm.tools_seen[0]
     assert "list_tasks" in llm.tools_seen[1] and "add_task" in llm.tools_seen[1]
     assert "Added the tasks tools" in llm.histories[1][-1]["result"]["message"]

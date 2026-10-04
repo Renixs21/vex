@@ -43,9 +43,11 @@ CATEGORIES: dict[str, dict] = {
         "keywords": ["pause", "resume", "next", "previous", "skip", "song", "songs", "music", "track", "playlist", "stop the"],
     },
     "tasks": {
-        "tools": ["add_task", "list_tasks", "complete_task", "set_reminder"],
-        "summary": "to-do list and reminders",
-        "keywords": ["task", "tasks", "todo", "to-do", "to do", "remind", "reminder", "reminders", "checklist", "due"],
+        "tools": ["add_task", "list_tasks", "complete_task", "edit_task", "delete_task", "set_reminder", "list_reminders",
+                  "cancel_reminder", "today_summary"],
+        "summary": "to-do list (add, edit, delete, complete) and reminders (one-time, recurring, list, cancel), what's on today",
+        "keywords": ["task", "tasks", "todo", "to-do", "to do", "remind", "reminder", "reminders", "checklist", "due", "agenda",
+                     "schedule", "what's on", "whats on", "on today", "my day", "recurring", "every day", "every week", "every weekday"],
     },
     "system": {
         "tools": ["set_volume", "mute", "set_brightness", "screenshot", "get_clipboard", "set_clipboard", "system_info", "lock_pc"],

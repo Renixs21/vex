@@ -169,6 +169,11 @@ class UndoStack:
                 return restore_from_recycle_bin(e["path"])
             if kind == "edited":
                 return UndoStack._undo_edit(e)
+            if kind == "task_deleted":
+                from tools import tasks  # local import: tools import this module
+
+                tasks.restore_line(e["line"], int(e["index"]))
+                return True, "Put the task back on your list."
         except OSError as ex:
             return False, f"Undo failed: {ex}"
         return False, f"I don't know how to undo '{kind}'."

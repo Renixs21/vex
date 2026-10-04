@@ -220,6 +220,10 @@ def run(on_ready=None, console: bool = False) -> int:
     controller = VexController(agent, frontend, stack.speaker if stack else SimulatedSpeaker(),
                                stack.capture if stack else typed, typed_capture=typed)
     holder["controller"] = controller
+    from voice.chime import play_reminder_chime
+
+    controller.chime = play_reminder_chime
+    reminders.set_announcer(controller.announce)             # a reminder is spoken (chime, orb, voice), not just a toast
     curator = build_curator(controller)
     consolidator = build_consolidator(controller)
 
@@ -232,6 +236,7 @@ def run(on_ready=None, console: bool = False) -> int:
             wake.stop()
         hotkey.stop()
         controller.shutdown()
+        reminders.set_announcer(None)
         reminders.stop()
         if clicks is not None:
             clicks.stop()

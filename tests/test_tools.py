@@ -312,7 +312,9 @@ def test_tasks_roundtrip_and_stay_out_of_memory_facts(env, monkeypatch, tmp_path
     assert ex.run("add_task", {"text": "call the dentist", "due": "friday"}).ok
     assert not ex.run("add_task", {"text": "my password is hunter2"}).ok
     out = ex.run("list_tasks", {}).message
-    assert "1. [ ] buy milk" in out and "2. [ ] call the dentist (due friday)" in out
+    import re
+
+    assert "1. [ ] buy milk" in out and re.search(r"2\. \[ \] call the dentist \(due \d{4}-\d{2}-\d{2}\)", out)       # 'friday' becomes a real date
     assert ex.run("complete_task", {"task": "dentist"}).ok
     assert ex.run("list_tasks", {}).message == "1. [ ] buy milk"
     assert "[x] call the dentist" in ex.run("list_tasks", {"include_done": True}).message

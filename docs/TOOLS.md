@@ -46,3 +46,22 @@ in such text. The user's own message is the only trusted instruction.
 ## Testing safely
 Tests never touch the real desktop: `tests/conftest.py` installs a backend that raises if the real window code is reached, and the tests use
 `tests/fake_windows.py`. To try the real thing, point it at a throwaway window you created yourself, never at your own documents.
+
+## Reminders and tasks
+| Tool | Tier | Notes |
+|---|---|---|
+| `set_reminder` | green | One-time ("in 20 minutes", "tomorrow 5pm") or recurring: "every weekday at 9", "every Monday and Thursday at 6:30pm", "daily at 8", "every 2 hours" (not below 5 minutes), "every other day at 8am", "every month on the 5th". A missing day or time is asked, not guessed. A bare "at 9" means 9 AM, "at 5" means 5 PM. |
+| `list_reminders` | green | Numbered in the order they come due, recurring ones with their rule and next time. |
+| `cancel_reminder` | green (cancel all: yellow) | By number or words from its text; an ambiguous match lists the candidates and asks for the number. |
+| `add_task`, `list_tasks`, `complete_task` | green | The list is `VexVault/tasks.md` (a plain markdown checklist you can edit by hand). A due date such as "friday at 5pm" is stored as a real date. |
+| `edit_task` | green | Change the text and/or due date (`due: none` clears it); keeps the checkbox. |
+| `delete_task` | yellow | Shows the exact task. `undo_last` puts it back in the same place. |
+| `today_summary` | green | "What's on today": reminders due today, tasks due today, overdue tasks, and how many other tasks are open. |
+
+**When a reminder fires:** Vex plays a two-note chime, shows the words on the orb and says "Reminder: ..." aloud, with a silent toast as well.
+If you are in the middle of a conversation it waits until that finishes (and the wake word stays paused while it speaks). If speaking fails
+the normal toast with sound is used instead. In text mode (no orb, no voice) the toast is the notification.
+
+**Surviving restarts:** reminders live in `data/reminders.json`. One-time reminders that came due while Vex was off are announced at the next
+start as "Reminder from earlier: ..."; a recurring one that missed an occurrence announces it once and carries on. A sweep every minute also
+catches anything a sleeping PC skipped. Cancelled and finished reminders are kept for 14 days and then dropped.

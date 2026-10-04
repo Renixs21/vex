@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import time
 from typing import Callable, Protocol
 
 from ui.frontend import VisualFrontend
@@ -83,6 +84,8 @@ class VexController:
         self._shutdown = False
         self._active_capture: Capture | None = None
         self._pending: tuple[str, str | None] | None = None      # the next turn queued by a barge-in (typed text / typed prompt)
+        self.chime: Callable[[], None] | None = None             # played before Vex speaks on its own (a reminder)
+        self._announcements: list[str] = []                      # things to say on Vex's own initiative, waiting for their turn
 
     # ---- triggers ----------------------------------------------------------------------------------------------------
     def start_listening(self, source: str = "hotkey", typed: bool = False) -> str:
@@ -120,6 +123,43 @@ class VexController:
                 self.speaker.stop()
                 return "barge_in"
             return self._spawn("text", text, source)
+
+    def announce(self, text: str) -> str:
+        """Say something on Vex's own initiative (a reminder fires): chime, caption, voice. If Vex is busy it waits its turn.
+
+        Returns "started", "queued" or "busy" (shutting down). Never interrupts a conversation."""
+        text = (text or "").strip()
+        if not text:
+            return "busy"
+        with self._lock:
+            if self._shutdown:
+                return "busy"
+            if self.state != IDLE or (self._thread is not None and self._thread.is_alive()):
+                self._announcements.append(text)
+                log.info("announcement queued: Vex is busy (%s)", self.state)
+                return "queued"
+            return self._spawn("announce", text, "announce")
+
+    def _flush_announcements(self) -> None:
+        """After an interaction ends: say what was queued, one at a time (each runs as its own interaction, so the wake word stays paused)."""
+        with self._lock:
+            if not self._announcements or self._shutdown:
+                return
+            text = self._announcements.pop(0)
+
+        def later() -> None:
+            for _ in range(40):
+                time.sleep(0.4)                                   # lets the finishing interaction thread exit first
+                with self._lock:
+                    if self._shutdown:
+                        return
+                    if self.state == IDLE and not (self._thread is not None and self._thread.is_alive()):
+                        self._spawn("announce", text, "announce")
+                        return
+            with self._lock:                                      # still busy after 16 s: keep it for the next interaction's end
+                self._announcements.insert(0, text)
+
+        threading.Thread(target=later, name="vex-announce", daemon=True).start()
 
     def _spawn(self, mode: str, text: str | None, source: str) -> str:
         if self.state != IDLE or (self._thread is not None and self._thread.is_alive()):
@@ -191,8 +231,28 @@ class VexController:
                 self.frontend.show_caption("")
                 self.frontend.hide()
             self._run_hooks(self.on_interaction_end, "end")
+            self._flush_announcements()
+
+    def _announce_turn(self, text: str) -> None:
+        """A reminder (or other self-started message): chime, show the words, speak them. No listening, no LLM."""
+        try:
+            self._set_state(SPEAKING)
+            self.frontend.show_caption(text)
+            if self.chime is not None:
+                try:
+                    self.chime()
+                except Exception:  # noqa: BLE001 - no chime is fine
+                    log.debug("chime failed", exc_info=True)
+            self.speaker.speak(text, self.frontend.set_level)
+        except Exception:  # noqa: BLE001 - if it cannot be spoken the caption (and the toast) still carry it
+            log.exception("announcement could not be spoken")
+        finally:
+            self.frontend.set_level(0.0)
 
     def _turn(self, mode: str = "listen", given: str | None = None) -> None:
+        if mode == "announce":
+            self._announce_turn(given or "")
+            return
         try:
             if mode == "text":
                 text = given
