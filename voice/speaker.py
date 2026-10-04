@@ -16,6 +16,7 @@ import threading
 import time
 from typing import Callable
 
+from voice.timeline import timeline
 from voice.tts import Audio, TTSChain, TTSUnavailable
 
 log = logging.getLogger("vex.speaker")
@@ -97,7 +98,7 @@ class VoiceSpeaker:
     def speak(self, text: str, on_level: Callable[[float], None]) -> None:
         """Speak a reply (a summary if it's long). Blocks until done or stop()ped. Raises SpeechUnavailable if nothing played."""
         spoken, self._remaining = plan_speech(text, self.max_chars, self.max_sentences)
-        self._play(split_sentences(spoken), on_level)
+        self._play(split_sentences(spoken), on_level, first_word=True)
 
     def speak_rest(self, on_level: Callable[[float], None]) -> bool:
         """Speak what the last long reply left over, in full. False if there is nothing left."""
@@ -121,7 +122,8 @@ class VoiceSpeaker:
             log.debug("player stop failed", exc_info=True)
 
     # ---- pipeline -------------------------------------------------------------------------------------------------------------
-    def _play(self, chunks: list[str], on_level: Callable[[float], None]) -> None:
+    def _play(self, chunks: list[str], on_level: Callable[[float], None], first_word: bool = False) -> None:
+        """`first_word`: this is a reply (not a confirmation question), so its first sound ends the latency stopwatch."""
         if not chunks:
             return
         cancel, done = threading.Event(), threading.Event()       # cancel: stop() was called; done: we're leaving, free the producer
@@ -168,6 +170,9 @@ class VoiceSpeaker:
                     log.warning("speech stopped part-way: %s", item)           # the caption still has the full text
                     break
                 assert isinstance(item, Audio)
+                if first_word and played == 0:
+                    timeline.mark("first_audio")                                  # the first sound starts now
+                    timeline.set(tts_provider=getattr(self.chain, "last_provider", None))
                 self.player.play(item.samples, item.rate, on_level)
                 played += 1
         finally:

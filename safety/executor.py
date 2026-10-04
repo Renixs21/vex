@@ -21,6 +21,7 @@ from memory.secrets import redact
 from safety import context, policy
 from safety.audit import AuditLog, _known_secret_values, scrub
 from safety.confirm import Confirmation, Confirmer, DenyAllConfirmer, TerminalConfirmer
+from voice.timeline import timeline
 from safety.elevation import DOWNGRADE_NOTE, HINT, NEEDS_ELEVATION, ElevationPolicy
 from safety.undo import UndoStack, configure as configure_undo
 from tools import registry
@@ -113,7 +114,9 @@ class Executor:
                                     extra={"via": dict(via)})
             outcome = "approved"
 
+        t_run = time.monotonic()
         result = registry.execute(name, args)
+        timeline.tool(name, time.monotonic() - t_run)               # the tool itself, not the time spent waiting for your answer
         context.mark_result(name, result.ok)                       # reading outside content taints the rest of the turn
         if name in ADMIN_TOOLS:
             result = self._elevation_followup(args, result, downgraded)

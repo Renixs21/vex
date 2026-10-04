@@ -91,3 +91,23 @@ Built and tested with the network mocked (no real Google call has been made yet)
 - Windows must allow desktop apps to use the microphone: Settings > Privacy & security > Microphone.
 - No sound: check `output_device` in `[voice]`; `logs/vex.log` says which TTS provider answered.
 - Limits and usage live in `data/voice_usage.json` (counts and timestamps only, never audio or text).
+
+## Latency: where the time goes
+Every voice turn is timed from the moment you stop talking to Vex's first spoken word, stage by stage, and written to `logs/latency.jsonl`
+(one line per turn: timings, provider names, counts and whether your sentence ended with a full stop; never what you said). Also in `vex.log`
+as `TURN TIMING ...`.
+
+```
+python tools_dev\latency_report.py              # your last 30 turns: table, medians / 90th percentile per stage, cut-off statistics
+python tools_dev\latency_report.py --last 10    # only your last 10 turns
+python tools_dev\latency_report.py --since "2026-10-04 17:30"
+```
+Stages: `endpoint_wait` (the silence Vex waits for), `stt` (upload + Whisper), `brain` (model calls and tools), `tts_first_audio` (reply ready ->
+first sound), `total`. The wake word adds `wake_to_trigger` and `trigger_to_record`.
+
+**The silence endpoint** (`[voice] silence_ms`, now 700; it was 1000) is the fixed wait in every turn. Lower is faster but cuts slow talkers off.
+**The mid-sentence-pause safeguard** (`resume_grace_ms = 500`, `resume_min_ms = 120`): after the endpoint the microphone stays open for 500 ms more
+while speech recognition is already running. If you carry on talking in that window, the recording is extended and both parts are transcribed
+together (the report counts these as "resumed": turns that would have been cut off). If you don't, nothing is lost: no extra time is spent.
+A pause longer than the window can still split a sentence; the report lists turns that did not end like a sentence and were followed by
+another turn within 15 seconds as "possible residual cut-offs". Don't go below 700 ms without looking at these numbers.

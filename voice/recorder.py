@@ -1,4 +1,8 @@
-"""Microphone recorder: starts when you trigger it, ends about one second after you stop talking.
+"""Microphone recorder: starts when you trigger it, ends a moment after you stop talking (`silence_ms`, 0.7 s by default).
+
+  * Mid-sentence-pause safeguard: when it ends on silence it keeps the microphone open for `grace_ms` more (in the background, while the
+    speech recognition is already running). If you carry on talking in that window the recording is extended: `Recording.resume.wait()`
+    returns the extra audio and the caller transcribes the two parts together. A pause longer than the window still ends the turn.
 
   * 16 kHz mono 16-bit in 30 ms frames (what the VAD and Whisper want), whatever the microphone delivers (the laptop mic array
     is 4-channel at 44.1/48 kHz: it is down-mixed and resampled here).
@@ -47,6 +51,88 @@ class Recording:
     seconds: float = 0.0
     speech_seconds: float = 0.0
     peak_rms: float = 0.0                # loudest frame heard (int16 units): ~1 in a silent room, 300-4000 for speech
+    t_start: float = 0.0                 # time.monotonic() when the microphone was listening, when the last voiced frame was heard,
+    t_last_voiced: float = 0.0           # and when the recorder decided you were done (for the latency timeline)
+    t_end: float = 0.0
+    resume: "ResumeProbe | None" = None  # the safeguard: speech that carries on right after the endpoint (see ResumeProbe)
+
+
+class ResumeProbe:
+    """Keeps listening for `grace_ms` after the recorder ended on silence, in a background thread.
+
+    `wait(timeout)` returns None if you did not speak again, or the extra audio (int16, 16 kHz) once the continuation is over
+    (it ends on the same silence rule, up to `max_extra_s`). The thread closes the microphone stream when it is done."""
+
+    def __init__(self, stream, frames: "queue.Queue[np.ndarray]", vad, close: Callable, grace_ms: int, resume_ms: int, silence_ms: int,
+                 cancel: threading.Event | None, max_extra_s: float = 8.0):
+        self._stream, self._frames, self._vad, self._close = stream, frames, vad, close
+        self.grace_ms, self.resume_ms, self.silence_ms = grace_ms, resume_ms, silence_ms
+        self._cancel = cancel
+        self.max_extra_s = max_extra_s
+        self.resumed = False
+        self.audio: np.ndarray | None = None
+        self.gap_s: float | None = None                 # silence between the endpoint and the first resumed frame
+        self._done = threading.Event()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="resume-probe", daemon=True)
+
+    def start(self) -> "ResumeProbe":
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def wait(self, timeout: float = 3.0) -> np.ndarray | None:
+        self._done.wait(timeout)
+        return self.audio if (self._done.is_set() and self.resumed) else None
+
+    def _cancelled(self) -> bool:
+        return self._stop.is_set() or (self._cancel is not None and self._cancel.is_set())
+
+    def _run(self) -> None:
+        t0 = time.monotonic()
+        recent: deque[np.ndarray] = deque(maxlen=4)
+        extra: list[np.ndarray] = []
+        voiced = silence = 0
+        started = False
+        try:
+            while not self._cancelled():
+                try:
+                    frame = self._frames.get(timeout=0.1)
+                except queue.Empty:
+                    if not started and (time.monotonic() - t0) * 1000 >= self.grace_ms:
+                        break
+                    continue
+                is_speech = self._vad.is_speech(frame)
+                if not started:
+                    recent.append(frame)
+                    voiced = voiced + 1 if is_speech else 0
+                    if voiced * FRAME_MS >= self.resume_ms:
+                        started = True
+                        self.resumed = True
+                        self.gap_s = round(time.monotonic() - t0 - voiced * FRAME_MS / 1000, 3)
+                        extra = list(recent)
+                        silence = 0
+                    elif (time.monotonic() - t0) * 1000 >= self.grace_ms:
+                        break
+                else:
+                    extra.append(frame)
+                    silence = 0 if is_speech else silence + 1
+                    if silence * FRAME_MS >= self.silence_ms or len(extra) * FRAME_MS / 1000 >= self.max_extra_s:
+                        break
+        except Exception:  # noqa: BLE001 - never leave the caller waiting
+            log.exception("resume probe failed")
+        finally:
+            if started and extra:
+                keep = max(0, len(extra) - max(0, silence - 7))
+                self.audio = np.concatenate(extra[:keep]) if keep else None
+                if self.audio is None:
+                    self.resumed = False
+            else:
+                self.resumed = False
+            self._close(self._stream)
+            self._done.set()
 
 
 # ---- voice activity detection ------------------------------------------------------------------------------------------
@@ -122,9 +208,11 @@ class Recorder:
     def __init__(self, device: str | int | None = "", silence_ms: int = 1000, max_seconds: float = 20,
                  no_speech_seconds: float = 6, preroll_ms: int = 500, min_speech_ms: int = 150, vad=None,
                  stream_factory: Callable | None = None, on_level: Callable[[float], None] | None = None,
-                 vad_aggressiveness: int = 2):
+                 vad_aggressiveness: int = 2, grace_ms: int = 0, resume_ms: int = 120):
         self.device = device or None
         self.silence_ms = silence_ms
+        self.grace_ms = grace_ms              # 0 = no mid-sentence-pause safeguard
+        self.resume_ms = resume_ms            # this much speech inside the grace window counts as "you carried on"
         self.max_seconds = max_seconds
         self.no_speech_seconds = no_speech_seconds
         self.preroll_ms = preroll_ms
@@ -194,6 +282,7 @@ class Recorder:
             log.warning("recording failed: %s", e)
             raise
         out.peak_rms = self._peak
+        out.t_end = time.monotonic()
         log.info("recording ended: %.1fs total, %.1fs of speech, peak RMS %.0f (%s)", out.seconds, out.speech_seconds, out.peak_rms, out.reason)
         return out
 
@@ -224,7 +313,9 @@ class Recorder:
         voiced = silence = 0
         n_frames = 0
         t0 = time.monotonic()
+        last_voiced = t0
         reopened = False
+        handed_off = False                                         # the resume probe takes over the stream after an endpoint on silence
         try:
             while True:
                 if cancel is not None and cancel.is_set():
@@ -247,6 +338,8 @@ class Recorder:
                 if self.on_level:
                     self.on_level(rms_to_level(rms))
                 is_speech = self.vad.is_speech(frame)
+                if is_speech:
+                    last_voiced = time.monotonic()
                 if not started:
                     preroll.append(frame)
                     voiced = voiced + 1 if is_speech else 0
@@ -260,11 +353,20 @@ class Recorder:
                     speech.append(frame)
                     silence = 0 if is_speech else silence + 1
                     if silence * FRAME_MS >= self.silence_ms:
-                        return self._finish(speech, silence, "speech", elapsed)
+                        rec = self._finish(speech, silence, "speech", elapsed)
+                        rec.t_start, rec.t_last_voiced = t0, last_voiced
+                        if self.grace_ms > 0 and len(rec.audio):
+                            rec.resume = ResumeProbe(stream, frames, self.vad, self._close, self.grace_ms, self.resume_ms,
+                                                     self.silence_ms, cancel).start()
+                            handed_off = True
+                        return rec
                     if elapsed >= limit:
-                        return self._finish(speech, silence, "max", elapsed)
+                        rec = self._finish(speech, silence, "max", elapsed)
+                        rec.t_start, rec.t_last_voiced = t0, last_voiced
+                        return rec
         finally:
-            self._close(stream)
+            if not handed_off:
+                self._close(stream)
 
     def _open_with_retry(self, device, callback, rate_holder):
         try:

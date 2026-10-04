@@ -44,7 +44,8 @@ def build_voice(cfg: dict | None = None, root: Path | None = None, on_level: Cal
     usage = UsageStore(root / "data" / "voice_usage.json")
     recorder = Recorder(device=cfg["input_device"], silence_ms=cfg["silence_ms"], max_seconds=cfg["max_seconds"],
                         no_speech_seconds=cfg["no_speech_seconds"], preroll_ms=cfg["preroll_ms"], on_level=on_level,
-                        vad_aggressiveness=cfg["vad_aggressiveness"])
+                        vad_aggressiveness=cfg["vad_aggressiveness"], grace_ms=int(cfg.get("resume_grace_ms", 0)),
+                        resume_ms=int(cfg.get("resume_min_ms", 120)))
     stt = GroqWhisper(api_key=config.env("GROQ_API_KEY"), model=cfg["stt_model"], language=cfg["language"],
                       prompt=cfg.get("stt_prompt", ""), usage=usage, seconds_per_hour=cfg["stt_seconds_per_hour"])
     key = root / config.env("GOOGLE_APPLICATION_CREDENTIALS", "google-tts-key.json")

@@ -58,7 +58,9 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "enabled": True,
         "input_device": "",              # blank = Windows default microphone; or part of a device name
         "output_device": "",
-        "silence_ms": 1000,              # this much quiet after you speak ends the recording
+        "silence_ms": 700,               # this much quiet after you speak ends the recording (was 1000; see docs/VOICE.md, latency)
+        "resume_grace_ms": 500,          # mid-sentence-pause safeguard: keep listening this long after the endpoint (0 = off)
+        "resume_min_ms": 120,            # ...and if you speak this long in that window, the recording is extended
         "max_seconds": 20,
         "no_speech_seconds": 6,          # give up if nothing is said for this long
         "vad_aggressiveness": 2,         # 0-3, higher filters more noise

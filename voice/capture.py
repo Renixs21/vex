@@ -6,14 +6,18 @@ falls back to the typed prompt and tells the user once why, so a limit or a miss
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from datetime import datetime
 from typing import Callable
 
+import numpy as np
+
 from voice.micstate import default_mic_muted
 from voice.recorder import NEAR_SILENT_RMS, MicUnavailable, Recorder
 from voice.stt import GroqWhisper, SttLimitReached, SttUnavailable
+from voice.timeline import timeline
 
 log = logging.getLogger("vex.capture")
 NOTICE_EVERY = 600.0                 # seconds between repeats of the same notice
@@ -35,6 +39,7 @@ class VoiceCapture:
         self._cancel = threading.Event()
         if not self.stt.available:
             return self._typed("noKey", "Speech recognition isn't set up (no GROQ_API_KEY), so type your command instead.")
+        timeline.mark("capture_start")
         try:
             rec = self.recorder.record(self._cancel)
         except MicUnavailable as e:
@@ -55,13 +60,22 @@ class VoiceCapture:
                     self.notify("Vex can't hear you", f"The microphone is almost silent (RMS {rec.peak_rms:.1f}). {why} You can also type instead.")
                 except Exception:  # noqa: BLE001
                     log.debug("notify failed", exc_info=True)
+        timeline.set(endpoint_ms=getattr(self.recorder, "silence_ms", None), grace_ms=getattr(self.recorder, "grace_ms", None))
+        if rec.t_start:
+            timeline.mark("record_start", rec.t_start)
+            timeline.mark("speech_end", rec.t_last_voiced or rec.t_end)
+            timeline.mark("record_end", rec.t_end)
         if rec.reason == "cancelled" or self._cancel.is_set():
+            if rec.resume is not None:
+                rec.resume.stop()
             return None
         if rec.reason == "no_speech" or len(rec.audio) == 0:
             return None
         try:
-            text = self.stt.transcribe(rec.audio) or None
+            text = self._transcribe(rec) or None
             log.info("speech recognition result: %r", text or "")
+            if text:
+                timeline.set(words=len(text.split()), ends_clean=bool(re.search(r"[.!?][\"')\]]?$", text.strip())))
             return text
         except SttLimitReached as e:
             until = datetime.fromtimestamp(time.time() + e.wait).strftime("%H:%M")
@@ -69,6 +83,47 @@ class VoiceCapture:
         except SttUnavailable as e:
             log.warning("speech recognition unavailable: %s", e)
             return self._typed("stt", "I couldn't reach speech recognition. Type your command instead.")
+
+    def _stt(self, audio: np.ndarray, discard: threading.Event | None = None) -> str:
+        """One transcription, with its start and end on the latency timeline (a discarded one leaves no end mark)."""
+        timeline.mark("stt_start")
+        timeline.set(audio_seconds=round(len(audio) / 16000, 2))
+        text = self.stt.transcribe(audio)
+        if discard is None or not discard.is_set():
+            timeline.mark("stt_end", overwrite=True)
+        return text
+
+    def _transcribe(self, rec) -> str:
+        """Speech to text. If you carried on talking right after the endpoint (the mid-sentence-pause safeguard) both parts are
+        transcribed together; otherwise the recognition that was already running is simply awaited, so the safeguard costs no time."""
+        probe = rec.resume
+        if probe is None:
+            return self._stt(rec.audio)
+        result: dict = {}
+        discard = threading.Event()
+
+        def first() -> None:
+            try:
+                result["text"] = self._stt(rec.audio, discard)
+            except BaseException as e:  # noqa: BLE001 - re-raised below, in the calling thread
+                result["err"] = e
+
+        worker = threading.Thread(target=first, name="stt-first", daemon=True)
+        worker.start()
+        try:
+            extra = probe.wait(timeout=probe.grace_ms / 1000 + probe.max_extra_s + 2)
+        finally:
+            probe.stop()
+        if extra is None:
+            worker.join()
+            if "err" in result:
+                raise result["err"]
+            return result.get("text", "")
+        discard.set()                                             # the first recognition is out of date: you were not done
+        log.info("you carried on after a pause of %.2fs: transcribing both parts together", probe.gap_s or 0.0)
+        timeline.set(resumed=True, resume_gap=probe.gap_s)
+        merged = np.concatenate([rec.audio, np.zeros(int(0.25 * 16000), np.int16), extra])
+        return self._stt(merged)
 
     def cancel(self) -> None:
         self._cancel.set()

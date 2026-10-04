@@ -26,6 +26,7 @@ from typing import Any, Callable, Protocol
 
 from config import env, settings
 from tools.registry import Tool
+from voice.timeline import timeline
 
 log = logging.getLogger("vex.llm")
 
@@ -365,9 +366,11 @@ class FallbackClient:
                 u = resp.usage or {}
                 self.stats.append({"provider": c.name, "prompt": u.get("prompt"), "completion": u.get("completion"),
                                    "tools": len(tools), "seconds": self._clock() - t0})
+                timeline.llm(c.name, self._clock() - t0, len(tools), u.get("prompt"))
                 return resp
             except Exception as e:  # noqa: BLE001
                 last = e
+                timeline.llm(c.name, self._clock() - t0, len(tools), ok=False)
                 nxt = order[i + 1] if i + 1 < len(order) else None
                 if _provider_down(e) and nxt is not None:
                     wait = min(MAX_COOLDOWN, max(self.cooldown, retry_after(e) or 0.0))

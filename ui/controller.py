@@ -20,6 +20,7 @@ from typing import Callable, Protocol
 
 from ui.frontend import VisualFrontend
 from ui.speaker import Speaker
+from voice.timeline import timeline
 
 log = logging.getLogger("vex.controller")
 
@@ -110,6 +111,8 @@ class VexController:
                 self._barge_in = True
                 self.speaker.stop()
                 return "barge_in"
+            if self.state == IDLE and not (self._thread is not None and self._thread.is_alive()):
+                timeline.begin(source)                                # the stopwatch starts at the trigger (before the turn thread runs)
             return self._spawn("typed" if typed else "listen", None, source)
 
     def submit_text(self, text: str, source: str = "typed") -> str:
@@ -122,6 +125,8 @@ class VexController:
                 self._barge_in = True
                 self.speaker.stop()
                 return "barge_in"
+            if self.state == IDLE and not (self._thread is not None and self._thread.is_alive()):
+                timeline.begin(source)
             return self._spawn("text", text, source)
 
     def announce(self, text: str) -> str:
@@ -223,6 +228,7 @@ class VexController:
                     break
                 mode, text = self._pending or ("listen", None)    # after a barge-in: the queued turn, else just listen
                 self._pending = None
+                timeline.begin("barge_in")
         finally:
             self._active_capture = None
             self._set_state(IDLE)
@@ -253,6 +259,7 @@ class VexController:
         if mode == "announce":
             self._announce_turn(given or "")
             return
+        outcome = "no_speech"
         try:
             if mode == "text":
                 text = given
@@ -269,8 +276,10 @@ class VexController:
                 self.frontend.show_caption("")
                 return
             text = text.strip()
+            timeline.mark("text_ready")
             self.frontend.show_caption(f"“{text}”")
             if self._read_rest(text):
+                outcome = "read_rest"
                 return
             if is_sleep(text):
                 self._sleep_after = True
@@ -279,6 +288,8 @@ class VexController:
                 return
             self._set_state(THINKING)
             reply = self.agent.run(text)
+            timeline.mark("brain_end")
+            outcome = "interrupted"
             if self._barge_in:                                   # interrupted while thinking: skip speaking
                 return
             self.last_reply = reply
@@ -290,11 +301,14 @@ class VexController:
             self._set_state(SPEAKING)
             self.frontend.show_caption(reply)
             self.speaker.speak(reply, self.frontend.set_level)
+            outcome = "spoken"
         except Exception:  # noqa: BLE001 - one bad turn must not kill the app
+            outcome = "error"
             log.exception("turn failed")
             self.frontend.show_caption("Something went wrong. Try again.")
         finally:
             self.frontend.set_level(0.0)
+            timeline.finish(outcome)
 
     def _read_rest(self, text: str) -> bool:
         """'Read the rest': speak what the last long reply left over, straight from the speaker, without asking the LLM."""

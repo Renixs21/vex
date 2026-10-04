@@ -9,6 +9,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from voice.timeline import timeline
+
 log = logging.getLogger("vex.app")
 
 
@@ -59,6 +61,7 @@ def build_wakeword(controller, stack, notify):
     holder: dict = {}
 
     def on_wake() -> str:
+        timeline.note_wake()                                                     # the latency stopwatch: the wake word was heard just now
         if controller.mic_muted:
             return controller.start_listening("wakeword")                       # says "The microphone is muted." and returns "muted"
         if wcfg["chime"]:
@@ -220,6 +223,7 @@ def run(on_ready=None, console: bool = False) -> int:
     controller = VexController(agent, frontend, stack.speaker if stack else SimulatedSpeaker(),
                                stack.capture if stack else typed, typed_capture=typed)
     holder["controller"] = controller
+    timeline.configure(config.ROOT / config.settings["paths"]["logs"] / "latency.jsonl")
     from voice.chime import play_reminder_chime
 
     controller.chime = play_reminder_chime
