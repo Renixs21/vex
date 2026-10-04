@@ -66,7 +66,9 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "followup_enabled": True,            # after a spoken reply keep listening briefly, no wake word needed (tray: Follow-up listening)
         "followup_s": 8,                     # how long that window stays open (0 = off)
         "followup_min_speech_ms": 250,       # voiced audio needed to count as speech in the window (stricter than a normal turn)
-        "followup_delay_ms": 300,            # the window opens this long after Vex's voice has fully stopped (its own echo)          # give up if nothing is said for this long
+        "followup_delay_ms": 300,
+        "wake_greeting": "What can I do for you?",   # spoken after a bare "Hey Vex" ("" = say nothing)
+        "wake_wait_s": 3.0,                  # after "Hey Vex", wait this long for the command before greeting            # the window opens this long after Vex's voice has fully stopped (its own echo)          # give up if nothing is said for this long
         "vad_aggressiveness": 2,         # 0-3, higher filters more noise
         "preroll_ms": 500,
         "stt_model": "whisper-large-v3-turbo",

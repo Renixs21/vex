@@ -202,7 +202,8 @@ def make_orb():
     folder = Path(tempfile.mkdtemp())
     (folder / "vex_ui").mkdir()
     (folder / "vex_ui" / "app.py").write_text("")
-    orb = OrbProcess(folder, popen=popen, port_in_use=lambda p: bool(procs and procs[-1].rc is None))
+    orb = OrbProcess(folder, port=1, click_port=2, popen=popen,                 # never the real orb's ports: stop() sends "quit"
+                     port_in_use=lambda p: bool(procs and procs[-1].rc is None))
     return orb, procs
 
 

@@ -141,3 +141,16 @@ quietly and Vex is back to wake-word-only mode (the orb's auto-sleep timer then 
 
 Why this was needed: after a reply only the wake-word scorer was re-armed (`on_interaction_end` -> `WakeWordListener.resume`, with a
 0.6 s settle), the recorder itself only opens inside a turn, so anything said without "Hey Vex" was scored for the wake phrase and dropped.
+
+## Sleep, goodbye, and a bare "Hey Vex"
+* **"We're done" intents** (any turn, inside or outside the follow-up window): "go to sleep", "you can go to sleep now", "no, go to sleep",
+  "go to your dock", "goodbye", "good night", "that's all", "stop listening", "nothing else", "never mind", even after leading
+  "stop, stop…" / "okay" / "no". Vex says a short "Okay." ("You're welcome." for a bare thank-you), parks the orb as the pill and goes
+  straight back to wake-word-only. **Never a follow-up window after these.** No language model call.
+* **A bare "Hey Vex"** (nothing after it, or only the wake phrase again, also inside a follow-up window): Vex says
+  `[voice] wake_greeting` ("What can I do for you?") and then listens for the command (the follow-up window). After the wake word Vex waits
+  `wake_wait_s` (3 s) for the command to start before greeting. The orb's own caption "What can I do for you today?" was only ever
+  text; before this, nothing was spoken.
+* The startup quiet mode only holds back toasts. It never silences a reply, the greeting or anything you triggered.
+* **Every reply explains itself in `logs\vex.log`**: `tts played: …`, `tts cancelled: …` (barge-in / quit), or `tts skipped: …` (empty
+  reply, interrupted while thinking, speech failed before any sound).

@@ -318,6 +318,8 @@ def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: in
     controller.followup_seconds = float(voice_cfg.get("followup_s", 8))
     controller.followup_min_speech_ms = int(voice_cfg.get("followup_min_speech_ms", 250))
     controller.followup_delay_s = float(voice_cfg.get("followup_delay_ms", 300)) / 1000
+    controller.wake_greeting = str(voice_cfg.get("wake_greeting", "What can I do for you?"))
+    controller.wake_wait_s = float(voice_cfg.get("wake_wait_s", 3.0))
     timeline.configure(config.ROOT / config.settings["paths"]["logs"] / "latency.jsonl")
     from voice.chime import play_reminder_chime
 
@@ -413,6 +415,7 @@ def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: in
         return health.summary_line(checks), str(path)
 
     tray.on_health = run_health
+    controller.listeners.append(lambda st: st == "idle" and health.write_heartbeat(heartbeat_path, status()))   # never a stale "followup"
     watchdog = QTimer()
     watchdog.timeout.connect(tick)
     QTimer.singleShot(3000, lambda: health.write_heartbeat(heartbeat_path, status()))

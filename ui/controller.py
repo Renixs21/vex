@@ -40,10 +40,48 @@ _SLEEP = re.compile(r"^(?:please\s+)?(?:go\s+(?:back\s+)?to\s+sleep|go\s+to\s+th
                     r"good\s*night(?:\s+vex)?)(?:\s+(?:vex|please))?$")
 
 
+_LEAD = re.compile(r"^(?:stop|wait|hold\s+on|no(?!\s+thanks?\b)|nope|nah|okay|ok|alright|all\s+right|right|so|well|now|please|just|and|then|hey|vex|hey\s+vex|"
+                   r"you\s+(?:can|may|could)|can\s+you|could\s+you|will\s+you|i\s+said)\s+")
+_TRAIL = re.compile(r"\s+(?:now|please|vex|then|for\s+now|for\s+today|thanks|thank\s+you|okay|ok)$")
+_DONE = re.compile(r"^(?:go\s+(?:back\s+)?to\s+sleep|sleep(?:\s+mode)?|go\s+(?:back\s+)?to\s+(?:your\s+|the\s+)?(?:dock|doc|edge|pill)|"
+                   r"(?:dock|hide|minimi[sz]e)(?:\s+yourself)?|good\s*bye|bye(?:\s+bye)?|see\s+you(?:\s+later)?|good\s*night|"
+                   r"that(?:'|\s)?s\s+(?:all|it|everything)|that\s+will\s+be\s+all|stop\s+listening|i'?m\s+(?:done|good)|we'?re\s+done|"
+                   r"nothing(?:\s+else)?|never\s*mind|no\s+thanks?|thanks?(?:\s+you)?(?:\s+(?:so\s+much|a\s+lot))?|"
+                   r"thank\s+you(?:\s+(?:so\s+much|a\s+lot))?)$")
+_THANKS = re.compile(r"^(?:thanks?|thank\s+you)(?:\s+(?:you|so\s+much|a\s+lot))*$")
+
+
+def _word_forms(text: str) -> list[str]:
+    """The words, then the same with filler peeled off step by step: "no, okay, you can go to sleep now please" -> ... -> "go to sleep"."""
+    t = " ".join(re.sub(r"[^a-z\s']", " ", (text or "").lower().replace("’", "'")).split())
+    forms = [t]
+    for _ in range(12):
+        t2 = _TRAIL.sub("", _LEAD.sub("", t))
+        if t2 == t:
+            break
+        t = t2
+        forms.append(t)
+    return forms
+
+
+def _normal_words(text: str) -> str:
+    return _word_forms(text)[-1]
+
+
+def done_intent(text: str) -> str | None:
+    """'sleep' for sleep / goodbye / that's all / stop listening / dock ...; 'thanks' for a bare thank-you; None otherwise.
+    Either way Vex gives a short reply and goes straight back to wake-word-only + the pill: never a follow-up window.
+    The least-trimmed form that matches decides ("no thanks" is a no, not a thank-you)."""
+    for t in _word_forms(text):
+        if t and _DONE.match(t):
+            return "thanks" if _THANKS.match(t) else "sleep"
+    return None
+
+
 def is_sleep(text: str) -> bool:
-    """True for 'sleep', 'go to sleep', 'dock', 'that's all', ... : the orb shrinks back into the edge pill."""
-    t = re.sub(r"[^a-z\s']", " ", (text or "").lower())
-    return bool(_SLEEP.match(" ".join(t.split())))
+    """True for 'sleep', 'go to sleep', 'you can go to sleep now', 'dock', 'that's all', 'goodbye', 'stop listening', ...:
+    the orb shrinks back into the edge pill."""
+    return done_intent(text) is not None
 
 
 _FOLLOWUP_END = re.compile(
@@ -53,9 +91,8 @@ _FOLLOWUP_END = re.compile(
 
 
 def is_followup_end(text: str) -> bool:
-    """In the follow-up window: 'that's all', 'thanks Vex', 'stop listening', ... end the window at once, quietly."""
-    t = re.sub(r"[^a-z\s']", " ", (text or "").lower().replace("’", "'"))
-    return bool(_FOLLOWUP_END.match(" ".join(t.split())))
+    """'that's all', 'thanks Vex', 'stop listening', 'go to sleep', ...: the same "we're done" intent as is_sleep."""
+    return done_intent(text) is not None or bool(_FOLLOWUP_END.match(_normal_words(text)))
 
 
 def is_read_rest(text: str) -> bool:
@@ -109,6 +146,10 @@ class VexController:
         self._confirm_asked = False
         self._last_outcome = ""
         self._sleep = time.sleep
+        # a bare "Hey Vex" (nothing after it): Vex says the greeting and listens for the command (the follow-up window)
+        self.wake_greeting = "What can I do for you?"
+        self.wake_wait_s = 3.0                                    # after the wake word, how long to wait for a command before greeting
+        self._source = ""
 
     # ---- triggers ----------------------------------------------------------------------------------------------------
     def start_listening(self, source: str = "hotkey", typed: bool = False) -> str:
@@ -203,6 +244,7 @@ class VexController:
         if self.state != IDLE or (self._thread is not None and self._thread.is_alive()):
             log.info("ignoring %s trigger: busy (%s)", source, self.state)
             return "busy"
+        self._source = source
         self._thread = threading.Thread(target=self._worker, args=(mode, text), name="vex-turn", daemon=True)
         self._thread.start()
         return "started"
@@ -283,6 +325,7 @@ class VexController:
                 self._sleep_after = False
                 self.frontend.show_caption("")
                 self.frontend.hide()
+                log.info("parked: orb -> pill, wake word only")
             self._run_hooks(self.on_interaction_end, "end")
             self._flush_announcements()
 
@@ -310,7 +353,7 @@ class VexController:
             why = "off"
         elif mode not in ("listen", "followup"):
             why = f"{mode} turn"
-        elif self._last_outcome not in ("spoken", "read_rest"):
+        elif self._last_outcome not in ("spoken", "read_rest", "greeted"):
             why = self._last_outcome or "no outcome"
         elif self._confirm_asked:
             why = "a confirmation was asked"
@@ -356,25 +399,36 @@ class VexController:
                     text = strip_wake_phrase(text)                       # "Hey Vex, and the weather?" works too
                     if text != raw.strip():
                         log.info("wake phrase in transcript: %r -> %r", raw, text)
-                    if is_followup_end(text):                            # "that's all" / "thanks Vex": done, quietly
-                        log.info("follow-up ended by %r", text)
-                        outcome = "followup_end"
-                        self._sleep_after = True
-                        self.frontend.show_caption("")
+                    if not text.strip() and self.wake_greeting and not self._barge_in:
+                        outcome = self._greet()                          # a bare "Hey Vex" in the window: greet, listen again
                         return
             elif mode == "text":
                 text = given
             else:
                 self._set_state(LISTENING)
                 self._active_capture = self.typed_capture if mode == "typed" else self.capture
-                text = self._active_capture()
+                after_wake = mode == "listen" and self._source == "wakeword" and hasattr(self._active_capture, "after_wake")
+                text = self._active_capture.after_wake(self.wake_wait_s) if after_wake else self._active_capture()
                 if text and mode != "typed":
                     raw = text
                     text = strip_wake_phrase(text)                       # "Hey Vex, open notepad" -> "open notepad"
                     if text != raw.strip():
                         log.info("wake phrase in transcript: %r -> %r", raw, text)
+                if (self._source == "wakeword" and mode == "listen" and not (text or "").strip() and not self._shutdown
+                        and not self._barge_in and not self.mic_muted and self.wake_greeting):
+                    outcome = self._greet()                          # a bare "Hey Vex": answer it out loud, then listen
+                    return
             if not text or not text.strip() or self._shutdown:
                 self.frontend.show_caption("")
+                return
+            intent = done_intent(text)
+            if intent is not None:                                   # sleep / goodbye / that's all / thanks: short reply, then the pill
+                outcome = "followup_end" if mode == "followup" else "sleep"
+                log.info("done intent (%s) from %r: short reply, then wake-word only", intent, text)
+                self._sleep_after = True
+                self.frontend.show_caption("")
+                self._set_state(SPEAKING)
+                self.speaker.speak("You're welcome." if intent == "thanks" else "Okay.", self.frontend.set_level)
                 return
             text = text.strip()
             timeline.mark("text_ready")
@@ -382,17 +436,15 @@ class VexController:
             if self._read_rest(text):
                 outcome = "read_rest"
                 return
-            if is_sleep(text):
-                self._sleep_after = True
-                self._set_state(SPEAKING)
-                self.speaker.speak("Okay.", self.frontend.set_level)
-                return
             self._set_state(THINKING)
             reply = self.agent.run(text)
             timeline.mark("brain_end")
             outcome = "interrupted"
             if self._barge_in:                                   # interrupted while thinking: skip speaking
+                log.info("tts skipped: interrupted while thinking")
                 return
+            if not (reply or "").strip():
+                log.info("tts skipped: the reply was empty")
             self.last_reply = reply
             for cb in list(self.on_turn):                        # e.g. the memory curator: cheap, must never break the turn
                 try:
@@ -412,6 +464,14 @@ class VexController:
             self._last_outcome = outcome
             timeline.set(followup=mode == "followup")
             timeline.finish(outcome)
+
+    def _greet(self) -> str:
+        """The spoken answer to a bare wake word. Returns the turn outcome ('greeted' opens the follow-up window for the command)."""
+        log.info("wake word with no command: greeting")
+        self._set_state(SPEAKING)
+        self.frontend.show_caption(self.wake_greeting)
+        self.speaker.speak(self.wake_greeting, self.frontend.set_level)
+        return "interrupted" if self._barge_in else "greeted"
 
     def _read_rest(self, text: str) -> bool:
         """'Read the rest': speak what the last long reply left over, straight from the speaker, without asking the LLM."""

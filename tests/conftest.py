@@ -93,3 +93,18 @@ def _autostart_never_touches_the_real_registry(tmp_path_factory):
     yield reg
     autostart.set_backend(autostart.RegistryBackend())
     autostart.set_state_path(None)
+
+
+@pytest.fixture(autouse=True)
+def _never_talk_to_the_real_orb(monkeypatch):
+    """Tests must never send to the running orb's ports (a stray "quit" closed the real orb once)."""
+    from ui import orb_frontend
+
+    real_send = orb_frontend.OrbFrontend._send
+
+    def guarded(self, **msg):
+        if self.addr[1] in (47474, 47475):
+            return
+        return real_send(self, **msg)
+
+    monkeypatch.setattr(orb_frontend.OrbFrontend, "_send", guarded)

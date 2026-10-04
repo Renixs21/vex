@@ -38,13 +38,19 @@ class VoiceCapture:
     def __call__(self) -> str | None:
         return self._capture()
 
+    def after_wake(self, seconds: float) -> str | None:
+        """Right after the wake word: a normal capture, but if no command starts within `seconds` it gives up quietly so Vex can say
+        its greeting and listen again (instead of six silent seconds)."""
+        return self._capture(no_speech_seconds=seconds, wake=True)
+
     def listen_followup(self, seconds: float, min_speech_ms: int = 250) -> str | None:
         """The follow-up window after a reply: listen up to `seconds` for speech to START (no wake word needed). Same endpointing and
         pipeline as a normal turn once you talk. Stricter start (`min_speech_ms` of voiced audio) so a cough or the room doesn't count.
         Quiet on failure: None (no typed prompt, no "can't hear you" toast), because you didn't ask for anything."""
         return self._capture(no_speech_seconds=seconds, min_speech_ms=min_speech_ms, followup=True)
 
-    def _capture(self, no_speech_seconds: float | None = None, min_speech_ms: int | None = None, followup: bool = False) -> str | None:
+    def _capture(self, no_speech_seconds: float | None = None, min_speech_ms: int | None = None, followup: bool = False,
+                 wake: bool = False) -> str | None:
         self._cancel = threading.Event()
         if not self.stt.available:
             if followup:
@@ -54,6 +60,8 @@ class VoiceCapture:
         try:
             if followup:
                 rec = self.recorder.record(self._cancel, no_speech_seconds=no_speech_seconds, min_speech_ms=min_speech_ms)
+            elif wake:
+                rec = self.recorder.record(self._cancel, no_speech_seconds=no_speech_seconds)
             else:
                 rec = self.recorder.record(self._cancel)
         except MicUnavailable as e:

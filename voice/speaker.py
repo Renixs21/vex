@@ -131,6 +131,7 @@ class VoiceSpeaker:
     def _play(self, chunks: list[str], on_level: Callable[[float], None], first_word: bool = False) -> None:
         """`first_word`: this is a reply (not a confirmation question), so its first sound ends the latency stopwatch."""
         if not chunks:
+            log.info("tts skipped: nothing to say (empty text)")
             return
         cancel, done = threading.Event(), threading.Event()       # cancel: stop() was called; done: we're leaving, free the producer
         self._cancel = cancel
@@ -162,6 +163,7 @@ class VoiceSpeaker:
         t.start()
         log.info("speech started (%d sentence(s))", len(chunks))
         played = 0
+        outcome = ""
         try:
             while not cancel.is_set():
                 try:
@@ -172,6 +174,7 @@ class VoiceSpeaker:
                     break
                 if isinstance(item, Exception):
                     if played == 0:
+                        outcome = f"tts skipped: speech failed before any sound ({type(item).__name__}: {str(item)[:120]})"
                         raise SpeechUnavailable(str(item)) from item
                     log.warning("speech stopped part-way: %s", item)           # the caption still has the full text
                     break
@@ -187,5 +190,13 @@ class VoiceSpeaker:
             on_level(0.0)
             log.info("speech ended (%d sentence(s) played%s, via %s)", played, ", stopped" if cancel.is_set() else "",
                      getattr(self.chain, "last_provider", None) or "?")
+            if not outcome:
+                if cancel.is_set():
+                    outcome = f"tts cancelled: stopped (barge-in or quit) after {played} of {len(chunks)} sentence(s)"
+                elif played == 0:
+                    outcome = "tts skipped: no audio came back"
+                else:
+                    outcome = f"tts played: {played} of {len(chunks)} sentence(s) via {getattr(self.chain, 'last_provider', None) or '?'}"
+            log.info(outcome)
             if not cancel.is_set():
                 self._sleep(self.guard_s)                                     # let the room go quiet before the mic opens

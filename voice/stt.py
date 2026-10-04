@@ -27,7 +27,8 @@ log = logging.getLogger("vex.stt")
 
 HOUR = 3600.0
 HALLUCINATIONS = frozenset({"thank you", "thanks for watching", "thanks for listening", "thank you for watching", "you", "bye",
-                            "bye bye", "okay", "ok", "uh", "um", "hmm", "mm-hmm", "so", "yeah"})
+                            "bye bye", "okay", "ok", "uh", "um", "hmm", "mm-hmm", "so", "yeah", "thanks", "thank you very much"})
+# ("thanks" was seen live: the 0.5 s tail of "Hey Vex" became "Thanks.", which ended the turn instead of the greeting)
 
 
 class SttError(Exception):
