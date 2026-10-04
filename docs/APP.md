@@ -17,7 +17,7 @@ window says so, offers **Start Vex** (starts the supervisor quietly), and reconn
 |---|---|
 | Home | built |
 | Memory | built |
-| Tools & permissions | next |
+| Tools & permissions | built |
 | Conversations, Tasks & reminders, Voice, System & health, Budget | after that |
 
 ### Home
@@ -48,6 +48,17 @@ Tabs **Focus | Galaxy | Timeline | Notes** and a search box (results drop down; 
   line are refused, like Vex's own viewer) / **Forget...** (shows exactly what Vex would remove, asks, then moves the note to the Recycle
   Bin). Below: the **Inbox** (facts Vex wasn't sure about) with Keep / Discard.
 * The sidebar card shows the vault size against its 200 MB soft cap while you're on Memory.
+
+### Tools & permissions
+* Tier tabs **All | Green | Yellow | Red** (with counts) and a search box.
+* The table: **Tool** (mono) | **What it does** | **Tier** pill | **Last used** (from the audit log) | **On** (a machined switch).
+  Switching a tool off takes effect at once: Vex stops offering it to the brain and refuses to run it. Switching a **red** tool back on
+  shows "Confirm on Vex's screen" here while Vex asks in its own on-screen dialog (never by voice); nothing switches a tool back on by
+  itself.
+* **Audit log** (right): every tool call, newest first: time, tool, what happened and how it was approved. **Undo** (or **Restore** for
+  a deleted file) reverses the one action "undo that" would reverse, through Vex's normal safety pipeline.
+* **How tiers work**: green runs at once; yellow asks first (voice, hotkey or screen); red always shows the exact command or path on
+  Vex's screen, never by voice and never from this app.
 
 ## Look
 Base `#0b0c0e`. Panels: brushed gunmetal (`shaders/panel.frag`: gradient `#1b1d21`->`#141619`, very faint vertical brush lines, 1px

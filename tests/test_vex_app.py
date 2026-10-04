@@ -14,7 +14,7 @@ pytest.importorskip("pytestqt")
 from ui.api_core import ApiCore                                     # noqa: E402 - the test side may use Vex; the app may not
 from ui.api_server import ApiServer                                  # noqa: E402
 from vex_app.client import ApiClient                                 # noqa: E402
-from vex_app.viewmodels import HomeModel, MemoryModel, StatusModel   # noqa: E402
+from vex_app.viewmodels import HomeModel, MemoryModel, StatusModel, ToolsModel   # noqa: E402
 
 TOKEN = "z" * 43
 APP_DIR = Path(__file__).resolve().parent.parent / "vex_app"
@@ -211,6 +211,7 @@ def test_the_qml_loads_without_errors_connected_and_offline(qtbot, server):
         ctx.setContextProperty("vex", status)
         ctx.setContextProperty("home", home)
         ctx.setContextProperty("memory", MemoryModel(client))
+        ctx.setContextProperty("tools", ToolsModel(client))
         ctx.setContextProperty("appPaths", {"icons": QUrl.fromLocalFile(str(paths.ICONS) + "/").toString(),
                                             "shaders": QUrl.fromLocalFile(str(paths.SHADERS) + "/").toString(),
                                             "web": QUrl.fromLocalFile(str(paths.WEB) + "/").toString()})
@@ -360,3 +361,93 @@ def test_graph_page_is_local_only():
     assert "http://" not in html and "https://" not in html                   # no CDN: everything from vendor/
     for f in ("sigma.min.js", "graphology.umd.min.js", "graphology-library.min.js"):
         assert f"vendor/{f}" in html and (APP_DIR / "web" / "vendor" / f).exists()
+
+
+# ---- the tools model ------------------------------------------------------------------------------------------------------------------------
+@pytest.fixture
+def tools_server(tmp_path):
+    import tools as tools_pkg
+    from helpers import YES, ScriptedConfirmer
+
+    tools_pkg.load_all()
+    c, *_ = make()
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    rows = [{"id": "a1", "ts": "2026-10-04T18:10:00+05:30", "tool": "open_app", "tier": "green", "decision": "auto", "ok": True,
+             "result": "Opened Notepad."},
+            {"id": "a2", "ts": "2026-10-04T18:39:00+05:30", "tool": "run_powershell", "tier": "red", "decision": "denied", "ok": False,
+             "reason": "action: declined", "via": {"action": "dialog"}},
+            {"id": "a3", "ts": "2026-10-04T18:40:00+05:30", "tool": "create_file", "tier": "green", "decision": "auto", "ok": True,
+             "result": "Created notes.txt", "undoable": True}]
+    (logs / "actions.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    undone = []
+    executor = SimpleNamespace(listeners=[], undo=SimpleNamespace(peek=lambda: None if undone else
+                                                                  {"audit_id": "a3", "kind": "created", "label": "Created notes.txt"}),
+                               run=lambda name, args: undone.append(name) or SimpleNamespace(ok=True, message="Removed notes.txt."))
+    dialog = ScriptedConfirmer()
+    core = ApiCore(controller=c, executor=executor, dialog_confirmer=dialog, logs=logs, data=tmp_path)
+    core.attach()
+    srv = ApiServer(core, TOKEN, port=0)
+    assert srv.start()
+    yield SimpleNamespace(server=srv, dialog=dialog, yes=YES, undone=undone)
+    srv.stop()
+
+
+def test_tools_model_lists_filters_and_counts(qtbot, tools_server):
+    client = connect(qtbot, tools_server.server.bound_port)
+    t = ToolsModel(client)
+    qtbot.waitUntil(lambda: len(t.tools) > 30, timeout=8000)
+    names = {x["name"]: x for x in t.tools}
+    assert names["open_app"]["tier"] == "green" and names["open_app"]["lastUsed"] != "never"
+    assert names["run_powershell"]["tier"] == "red" and names["run_powershell"]["enabled"]
+    assert t.counts["red"] >= 1 and t.counts["all"] == len(t.tools)
+    t.setTier("red")
+    assert t.tools and all(x["tier"] == "red" for x in t.tools)
+    t.setTier("all")
+    t.setQuery("clipboard")
+    assert {x["name"] for x in t.tools} == {"get_clipboard", "set_clipboard"}
+    qtbot.waitUntil(lambda: len(t.audit) == 3, timeout=5000)
+    audit = t.audit
+    assert audit[0]["tool"] == "create_file" and audit[1]["decision"] == "declined" and audit[1]["via"] == "dialog"
+    qtbot.waitUntil(lambda: t.undoInfo["available"], timeout=5000)        # a separate request: may arrive after the list
+    assert t.undoInfo == {"available": True, "auditId": "a3", "label": "Created notes.txt", "verb": "Undo"}
+    client.stop()
+
+
+def test_tools_model_switches_off_and_red_back_on_only_with_the_on_screen_yes(qtbot, tools_server):
+    from tools import registry
+
+    client = connect(qtbot, tools_server.server.bound_port)
+    t = ToolsModel(client)
+    toasts = []
+    t.toast.connect(toasts.append)
+    qtbot.waitUntil(lambda: len(t.tools) > 30, timeout=8000)
+    t.setEnabled("run_powershell", False)
+    qtbot.waitUntil(lambda: not registry.is_enabled("run_powershell"), timeout=5000)
+    qtbot.waitUntil(lambda: not next(x for x in t.tools if x["name"] == "run_powershell")["enabled"], timeout=5000)
+    tools_server.dialog.answers = [tools_server.yes]
+    t.setEnabled("run_powershell", True)
+    assert any("Confirm on Vex's screen" in m for m in toasts)
+    assert next(x for x in t.tools if x["name"] == "run_powershell")["pending"]
+    qtbot.waitUntil(lambda: registry.is_enabled("run_powershell"), timeout=5000)
+    assert tools_server.dialog.requests[-1].tier == "red"
+    client.stop()
+
+
+def test_tools_model_undo_goes_through_vex(qtbot, tools_server):
+    client = connect(qtbot, tools_server.server.bound_port)
+    t = ToolsModel(client)
+    toasts = []
+    t.toast.connect(toasts.append)
+    qtbot.waitUntil(lambda: t.undoInfo["available"], timeout=8000)
+    t.undo()
+    qtbot.waitUntil(lambda: bool(toasts), timeout=5000)
+    assert tools_server.undone == ["undo_last"] and toasts[-1] == "Removed notes.txt."
+    qtbot.waitUntil(lambda: not t.undoInfo["available"], timeout=5000)
+    client.stop()
+
+
+def test_restore_is_the_word_for_an_undone_delete(qtbot):
+    t = ToolsModel(ApiClient(1, lambda: ""))
+    t._undo = {"audit_id": "x", "kind": "deleted", "label": "Deleted old.txt"}
+    assert t.undoInfo["verb"] == "Restore"

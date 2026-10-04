@@ -532,3 +532,155 @@ class MemoryModel(QObject):
                 "text": f"{float(s.get('mb', 0)):.1f} MB of {float(s.get('cap_mb', 200)):.0f} MB"}
 
     size = Property("QVariantMap", _size_view, notify=changed)
+
+
+class ToolsModel(QObject):
+    """Tools & permissions: every tool with its tier, on/off and last use; the audit log with Undo/Restore for the last undoable action."""
+
+    changed = Signal()
+    toast = Signal(str)
+
+    def __init__(self, client: ApiClient, parent=None):
+        super().__init__(parent)
+        self.client = client
+        self._tools: list = []
+        self._audit: list = []
+        self._undo: dict | None = None
+        self._tier = "all"
+        self._query = ""
+        self._pending: set[str] = set()                         # red tools waiting for your answer on Vex's screen
+        client.connectedChanged.connect(lambda: client.connected and self.refresh())
+        client.event.connect(self._on_event)
+
+    @Slot()
+    def refresh(self) -> None:
+        if not self.client.connected:
+            return
+        self.client.call("tools.list", {}, self._got_tools)
+        self.client.call("audit", {"limit": 60}, self._got_audit)
+        self.client.call("undo.peek", {}, lambda ok, d, e: ok and self._set("_undo", d))
+
+    def _set(self, attr: str, value) -> None:
+        setattr(self, attr, value)
+        self.changed.emit()
+
+    def _on_event(self, name: str, data) -> None:
+        if name == "activity" and isinstance(data, dict) and data.get("kind") in ("tool", "tools"):
+            self.refresh()
+
+    def _got_tools(self, ok: bool, data, err: str) -> None:
+        if not ok:
+            return
+        rows = []
+        for t in data or []:
+            rows.append({"name": t["name"], "tier": t["tier"], "enabled": bool(t["enabled"]), "description": t.get("description", ""),
+                         "category": t.get("category", ""), "lastUsed": self._when(t.get("last_used"))})
+        rows.sort(key=lambda r: (TIER_ORDER.get(r["tier"], 9), r["name"]))
+        self._set("_tools", rows)
+
+    @staticmethod
+    def _when(ts) -> str:
+        if not ts:
+            return "never"
+        try:
+            dt = datetime.fromisoformat(str(ts))
+        except ValueError:
+            return str(ts)[:16]
+        now = datetime.now(dt.tzinfo)
+        return dt.strftime("%H:%M") if dt.date() == now.date() else dt.strftime("%d %b %H:%M")
+
+    @staticmethod
+    def _short_when(ts) -> str:
+        """Today: 14:05. Earlier: 03 Oct (the audit column is narrow)."""
+        try:
+            dt = datetime.fromisoformat(str(ts))
+        except ValueError:
+            return str(ts)[:5]
+        return dt.strftime("%H:%M") if dt.date() == datetime.now(dt.tzinfo).date() else dt.strftime("%d %b")
+
+    def _got_audit(self, ok: bool, data, err: str) -> None:
+        if not ok:
+            return
+        rows = []
+        for r in reversed(data or []):
+            decision = str(r.get("decision", ""))
+            rows.append({"id": r.get("id", ""), "time": self._short_when(r.get("ts")), "tool": r.get("tool", "?"), "tier": r.get("tier", ""),
+                         "decision": {"auto": "ran", "approved": "approved", "denied": "declined", "timeout": "no answer",
+                                      "blocked": "blocked", "refused": "refused", "dry_run": "dry run", "disabled": "switched off"}
+                         .get(decision, decision),
+                         "ok": bool(r.get("ok")), "result": str(r.get("result") or r.get("reason") or "")[:160],
+                         "undoable": bool(r.get("undoable")), "via": self._via(r.get("via"))})
+        self._set("_audit", rows)
+
+    @staticmethod
+    def _via(via) -> str:
+        if isinstance(via, dict) and via:
+            return ", ".join(sorted(set(str(v) for v in via.values())))
+        return ""
+
+    # ---- filters ----------------------------------------------------------------------------------------------------------------
+    @Slot(str)
+    def setTier(self, tier: str) -> None:
+        self._set("_tier", tier or "all")
+
+    @Slot(str)
+    def setQuery(self, q: str) -> None:
+        self._set("_query", (q or "").strip().lower())
+
+    def _visible(self) -> list:
+        out = []
+        for t in self._tools:
+            if self._tier != "all" and t["tier"] != self._tier:
+                continue
+            if self._query and self._query not in t["name"].lower() and self._query not in t["description"].lower():
+                continue
+            out.append({**t, "pending": t["name"] in self._pending})
+        return out
+
+    def _counts(self) -> dict:
+        c = {"all": len(self._tools), "green": 0, "yellow": 0, "red": 0, "off": 0}
+        for t in self._tools:
+            c[t["tier"]] = c.get(t["tier"], 0) + 1
+            c["off"] += 0 if t["enabled"] else 1
+        return c
+
+    # ---- actions ------------------------------------------------------------------------------------------------------------------
+    @Slot(str, bool)
+    def setEnabled(self, name: str, on: bool) -> None:
+        tool = next((t for t in self._tools if t["name"] == name), None)
+        if tool is None or tool["enabled"] == on or name in self._pending:
+            return
+        if on and tool["tier"] == "red":
+            self._pending.add(name)
+            self.changed.emit()
+            self.toast.emit(f"Confirm on Vex's screen to switch {name} back on")
+
+        def done(ok, d, e):
+            self._pending.discard(name)
+            if not ok:
+                self.toast.emit(e or "That didn't work")
+            self.refresh()
+
+        self.client.call("tools.enable" if on else "tools.disable", {"name": name}, done)
+
+    @Slot()
+    def undo(self) -> None:
+        def done(ok, d, e):
+            self.toast.emit((d or {}).get("message") if ok and d else (e or "Couldn't undo that"))
+            self.refresh()
+
+        self.client.call("undo", {}, done)
+
+    tools = Property("QVariantList", _visible, notify=changed)
+    audit = Property("QVariantList", lambda self: self._audit, notify=changed)
+    counts = Property("QVariantMap", _counts, notify=changed)
+    tier = Property(str, lambda self: self._tier, notify=changed)
+
+    def _undo_view(self) -> dict:
+        u = self._undo or {}
+        if not u:
+            return {"available": False, "auditId": "", "label": "", "verb": ""}
+        return {"available": True, "auditId": u.get("audit_id") or "", "label": u.get("label") or "",
+                "verb": "Restore" if u.get("kind") == "deleted" else "Undo"}
+
+    undoInfo = Property("QVariantMap", _undo_view, notify=changed)
