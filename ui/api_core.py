@@ -40,6 +40,7 @@ class ApiCore:
                  dialog_confirmer=None, housekeeper=None, health_fn: Callable[[], dict] | None = None,
                  logs: Path | None = None, data: Path | None = None, budget_cfg: dict | None = None,
                  latency_path: Path | None = None, status_fn: Callable[[], dict] | None = None, hotkey: str = "", conversations=None,
+                 voice_control=None,
                  clock: Callable[[], float] = time.time):
         self.controller = controller
         self.executor = executor
@@ -50,6 +51,7 @@ class ApiCore:
         self.health_fn = health_fn
         self.status_fn = status_fn                      # the app's live status (wake word, orb, hotkey...): app_status()
         self.conversations = conversations              # ui.conversations.ConversationLog (None: no history)
+        self.voice = voice_control                      # ui.voice_control.VoiceControl (None: no voice settings)
         self.hotkey = hotkey
         self._clock = clock
         self.started_at = clock()
@@ -81,6 +83,8 @@ class ApiCore:
             "conversations.list": self.conversations_list, "conversations.get": self.conversations_get,
             "tasks.add": self.tasks_add, "tasks.complete": self.tasks_complete, "tasks.delete": self.tasks_delete,
             "reminders.add": self.reminders_add, "reminders.cancel": self.reminders_cancel,
+            "voice.get": self.voice_get, "voice.set": self.voice_set, "voice.levels": self.voice_levels, "voice.preview": self.voice_preview,
+            "latency.turns": self.latency_turns,
         }
 
     # ---- wiring (called by the app once) ------------------------------------------------------------------------------------
@@ -546,6 +550,48 @@ class ApiCore:
         rows = latency_report.load(self.latency_path)
         n = max(1, min(500, int(args.get("last", 30))))
         return latency_report.summary(rows[-n:])
+
+    def latency_turns(self, args: dict) -> list[dict]:
+        """The last spoken turns' timings, oldest first (the Voice screen's chart): ts, source, total and the stages."""
+        tools_dev = Path(__file__).resolve().parent.parent / "tools_dev"
+        if str(tools_dev) not in sys.path:
+            sys.path.insert(0, str(tools_dev))
+        import latency_report
+
+        n = max(1, min(200, int(args.get("last", 40))))
+        rows = [r for r in latency_report.load(self.latency_path) if r.get("outcome") == "spoken" and "total" in r.get("stages", {})]
+        out = []
+        for r in rows[-n:]:
+            st = r["stages"]
+            out.append({"ts": r.get("ts"), "source": r.get("source"), "total": st.get("total"), "stt": st.get("stt"),
+                        "brain": st.get("brain"), "first_audio": st.get("tts_first_audio"), "followup": bool(r.get("followup"))})
+        return out
+
+    # ---- voice ---------------------------------------------------------------------------------------------------------------------------
+    def _voice(self):
+        if self.voice is None:
+            raise ApiError("voice settings aren't available")
+        return self.voice
+
+    def voice_get(self, args: dict) -> dict:
+        return self._voice().get()
+
+    def voice_levels(self, args: dict) -> dict:
+        return self._voice().levels()
+
+    def voice_set(self, args: dict) -> dict:
+        try:
+            r = self._voice().set(args)
+        except (ValueError, TypeError) as e:
+            raise ApiError(str(e)) from e
+        self._add_activity("voice", change=", ".join(f"{k} {v}" for k, v in args.items()))
+        return r
+
+    def voice_preview(self, args: dict) -> dict:
+        try:
+            return self._voice().preview(str(args.get("voice", "")))
+        except ValueError as e:
+            raise ApiError(str(e)) from e
 
     def autostart_get(self, args: dict) -> dict:
         from ui import autostart

@@ -173,7 +173,7 @@ def app_status(controller, hotkey, wake, orb, tray) -> dict:
             "reminders": bool(sched is not None and getattr(sched, "running", False))}
 
 
-def build_api(controller, executor, tray, tracker, dialog, housekeeper, status):
+def build_api(controller, executor, tray, tracker, dialog, housekeeper, status, wake=None, stack=None):
     """The local API (docs/API.md), or None if it is off or can't start. Never raises: Vex runs the same without it."""
     import config
 
@@ -196,7 +196,10 @@ def build_api(controller, executor, tray, tracker, dialog, housekeeper, status):
 
         keep = int(cfg.get("keep_conversations_days", 14))
         conversations = ConversationLog(config.ROOT / "data" / "conversations.jsonl", keep_days=keep)
+        from ui.voice_control import VoiceControl
+
         core = ApiCore(controller=controller, executor=executor, tray=tray, memory_factory=memory_tools.get_memory, conversations=conversations,
+                       voice_control=VoiceControl(controller, wake=wake, stack=stack),
                        dialog_confirmer=dialog, housekeeper=housekeeper, health_fn=health_fn, status_fn=status,
                        hotkey=pretty_combo(config.settings["ui"]["hotkey"]))
         core.attach()
@@ -495,7 +498,7 @@ def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: in
         return health.summary_line(checks), str(path)
 
     tray.on_health = run_health
-    api = build_api(controller, executor, tray, tracker, dialog, housekeeper, status)
+    api = build_api(controller, executor, tray, tracker, dialog, housekeeper, status, wake=wake, stack=stack)
     holder["api"] = api
     controller.listeners.append(lambda st: st == "idle" and health.write_heartbeat(heartbeat_path, status()))   # never a stale "followup"
     watchdog = QTimer()

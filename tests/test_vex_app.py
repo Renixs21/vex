@@ -14,7 +14,8 @@ pytest.importorskip("pytestqt")
 from ui.api_core import ApiCore                                     # noqa: E402 - the test side may use Vex; the app may not
 from ui.api_server import ApiServer                                  # noqa: E402
 from vex_app.client import ApiClient                                 # noqa: E402
-from vex_app.viewmodels import ConversationsModel, HomeModel, MemoryModel, StatusModel, TasksModel, ToolsModel  # noqa: E402
+from vex_app.viewmodels import (ConversationsModel, HomeModel, MemoryModel, StatusModel, TasksModel, ToolsModel,  # noqa: E402
+                                VoiceModel)
 
 TOKEN = "z" * 43
 APP_DIR = Path(__file__).resolve().parent.parent / "vex_app"
@@ -214,6 +215,7 @@ def test_the_qml_loads_without_errors_connected_and_offline(qtbot, server):
         ctx.setContextProperty("tools", ToolsModel(client))
         ctx.setContextProperty("conversations", ConversationsModel(client))
         ctx.setContextProperty("tasksModel", TasksModel(client))
+        ctx.setContextProperty("voiceModel", VoiceModel(client))
         ctx.setContextProperty("appPaths", {"icons": QUrl.fromLocalFile(str(paths.ICONS) + "/").toString(),
                                             "shaders": QUrl.fromLocalFile(str(paths.SHADERS) + "/").toString(),
                                             "web": QUrl.fromLocalFile(str(paths.WEB) + "/").toString()})
@@ -532,3 +534,47 @@ def test_task_api_commands_go_through_the_executor(tmp_path):
     from ui.api_core import ApiError
     with _pytest.raises(ApiError):
         core.reminders_add({"text": "x", "when": ""})
+
+
+# ---- the voice model --------------------------------------------------------------------------------------------------------------------
+def test_voice_model_reads_polls_and_changes_settings(qtbot, tmp_path):
+    import json as _json
+
+    from ui.voice_control import VoiceControl
+
+    c, *_ = make()
+    saved = []
+    wake = SimpleNamespace(threshold=0.24, label="Hey Vex", running=True, last_level=0.4, last_score=0.1, paused=False)   # a property in Vex
+    edge = SimpleNamespace(name="edge", voice="en-US-AriaNeural")
+    stack = SimpleNamespace(chain=SimpleNamespace(providers=[edge]), speaker=None)
+    settings = {"voice": {"edge_voice": "en-US-AriaNeural", "edge_candidates": ["en-US-AriaNeural", "en-IN-NeerjaExpressiveNeural"],
+                          "followup_s": 8, "followup_enabled": True}, "wakeword": {"enabled": True, "threshold": 0.24}}
+    vc = VoiceControl(c, wake=wake, stack=stack, set_value=lambda s, k, v: saved.append((s, k, v)), settings=settings)
+    (tmp_path / "latency.jsonl").write_text(_json.dumps({"ts": "2026-10-04T18:00:00", "source": "hotkey", "outcome": "spoken",
+                                                         "stages": {"total": 4.4}}) + "\n", encoding="utf-8")
+    core = ApiCore(controller=c, voice_control=vc, logs=tmp_path, data=tmp_path, latency_path=tmp_path / "latency.jsonl")
+    srv = ApiServer(core, TOKEN, port=0)
+    assert srv.start()
+    try:
+        client = connect(qtbot, srv.bound_port)
+        m = VoiceModel(client)
+        qtbot.waitUntil(lambda: m.wakeAvailable and bool(m.turns), timeout=8000)
+        assert m.threshold == 0.24 and m.followupSeconds == c.followup_seconds and m.voice == "en-US-AriaNeural"
+        assert [v["label"] for v in m.voices] == ["Aria", "Neerja (expressive)"] and m.voices[1]["region"] == "en-IN"
+        m.setLive(True)
+        qtbot.waitUntil(lambda: m.level == 0.4 and m.listening, timeout=5000)
+        m.setLive(False)
+        m.setThreshold(0.3)
+        m.setFollowupSeconds(5)
+        m.setVoice("en-IN-NeerjaExpressiveNeural")
+        qtbot.waitUntil(lambda: m.voice == "en-IN-NeerjaExpressiveNeural" and m.followupSeconds == 5 and abs(m.threshold - 0.3) < 1e-9,
+                        timeout=5000)
+        assert wake.threshold == 0.3 and edge.voice == "en-IN-NeerjaExpressiveNeural" and ("voice", "followup_s", 5) in saved
+        toasts = []
+        m.toast.connect(toasts.append)
+        m.setThreshold(0.99)                                                 # out of range: refused, settings re-read
+        qtbot.waitUntil(lambda: bool(toasts), timeout=5000)
+        assert "between" in toasts[-1] and wake.threshold == 0.3
+        client.stop()
+    finally:
+        srv.stop()

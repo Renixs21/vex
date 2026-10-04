@@ -864,3 +864,113 @@ class TasksModel(QObject):
     tasks = Property("QVariantList", lambda self: self._tasks, notify=changed)
     reminders = Property("QVariantList", lambda self: self._reminders, notify=changed)
     openCount = Property(int, lambda self: sum(1 for t in self._tasks if not t["done"]), notify=changed)
+
+
+class VoiceModel(QObject):
+    """Voice: wake word sensitivity with a live mic meter and wake score, the follow-up window, Vex's voice, and the response-time chart."""
+
+    changed = Signal()
+    levelsChanged = Signal()
+    toast = Signal(str)
+
+    def __init__(self, client: ApiClient, parent=None):
+        super().__init__(parent)
+        self.client = client
+        self._settings: dict = {}
+        self._levels: dict = {"level": 0.0, "score": 0.0, "threshold": 0.5, "listening": False}
+        self._turns: list = []
+        self._poll = QTimer(self)
+        self._poll.setInterval(120)                          # ~8 per second while the Voice screen is open
+        self._poll.timeout.connect(self._ask_levels)
+        self._waiting = False
+        client.connectedChanged.connect(lambda: client.connected and self.refresh())
+
+    @Slot()
+    def refresh(self) -> None:
+        if not self.client.connected:
+            return
+        self.client.call("voice.get", {}, lambda ok, d, e: ok and self._set("_settings", d or {}))
+        self.client.call("latency.turns", {"last": 40}, lambda ok, d, e: ok and self._set("_turns", d or []))
+
+    def _set(self, attr: str, value) -> None:
+        setattr(self, attr, value)
+        self.changed.emit()
+
+    @Slot(bool)
+    def setLive(self, on: bool) -> None:
+        """Poll the mic level only while the screen is visible."""
+        (self._poll.start if on else self._poll.stop)()
+
+    def _ask_levels(self) -> None:
+        if self._waiting or not self.client.connected:
+            return
+        self._waiting = True
+
+        def done(ok, d, e):
+            self._waiting = False
+            if ok and d:
+                self._levels = d
+                self.levelsChanged.emit()
+
+        self.client.call("voice.levels", {}, done)
+
+    def _apply(self, args: dict, message: str = "") -> None:
+        def done(ok, d, e):
+            if ok:
+                self._set("_settings", d or {})
+                if message:
+                    self.toast.emit(message)
+            else:
+                self.toast.emit(e or "Not changed")
+                self.refresh()
+
+        self.client.call("voice.set", args, done)
+
+    @Slot(float)
+    def setThreshold(self, value: float) -> None:
+        self._apply({"threshold": round(float(value), 3)}, f"Wake word threshold {value:.2f}")
+
+    @Slot(int)
+    def setFollowupSeconds(self, seconds: int) -> None:
+        self._apply({"followup_seconds": int(seconds)})
+
+    @Slot(bool)
+    def setFollowupEnabled(self, on: bool) -> None:
+        self._apply({"followup_enabled": bool(on)})
+
+    @Slot(str)
+    def setVoice(self, name: str) -> None:
+        self._apply({"voice": name}, "Vex's voice changed")
+
+    @Slot(str)
+    def preview(self, name: str) -> None:
+        self.client.call("voice.preview", {"voice": name}, lambda ok, d, e: (not ok) and self.toast.emit(e or "Couldn't play that"))
+
+    def _get(self, *keys, default=None):
+        v = self._settings
+        for k in keys:
+            v = v.get(k, {}) if isinstance(v, dict) else {}
+        return default if v in ({}, None) else v
+
+    wakeAvailable = Property(bool, lambda self: bool(self._get("wake", "available", default=False)), notify=changed)
+    wakeLabel = Property(str, lambda self: str(self._get("wake", "label", default="")), notify=changed)
+    threshold = Property(float, lambda self: float(self._get("wake", "threshold", default=0.5)), notify=changed)
+    followupEnabled = Property(bool, lambda self: bool(self._get("followup", "enabled", default=False)), notify=changed)
+    followupSeconds = Property(int, lambda self: int(round(float(self._get("followup", "seconds", default=0)))), notify=changed)
+    voice = Property(str, lambda self: str(self._get("voice", "current", default="")), notify=changed)
+
+    def _voices(self) -> list:
+        out = []
+        for name in self._get("voice", "candidates", default=[]) or []:
+            parts = name.split("-")
+            region = "-".join(parts[:2]) if len(parts) >= 2 else ""
+            nice = parts[2].replace("Neural", "") if len(parts) >= 3 else name
+            nice = nice.replace("Expressive", " (expressive)").replace("Multilingual", " (multilingual)")
+            out.append({"name": name, "label": nice, "region": region})
+        return out
+
+    voices = Property("QVariantList", _voices, notify=changed)
+    turns = Property("QVariantList", lambda self: self._turns, notify=changed)
+    level = Property(float, lambda self: float(self._levels.get("level", 0.0)), notify=levelsChanged)
+    score = Property(float, lambda self: float(self._levels.get("score", 0.0)), notify=levelsChanged)
+    listening = Property(bool, lambda self: bool(self._levels.get("listening", False)), notify=levelsChanged)

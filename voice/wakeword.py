@@ -197,6 +197,7 @@ class WakeWordListener:
         self._notified = False
         self.running = False                      # the model is loaded and the stream is open
         self.last_score = 0.0
+        self.last_level = 0.0                  # 0..1 loudness of the latest audio frame (the Control Center's live mic meter)
         self.wakes = 0
         self.paused_peak_rms = 0.0                # loudest audio heard during the current pause (proves what the mic picked up)
 
@@ -356,6 +357,8 @@ class WakeWordListener:
                     raise RuntimeError("the microphone stopped delivering audio (unplugged or the default device changed)")
                 continue
             silent_since = self._clock()
+            rms = float(np.sqrt(np.mean(frame.astype(np.float32) ** 2)))
+            self.last_level = min(1.0, (rms / 2500.0) ** 0.6)
             if self._paused:
                 with self._lock:
                     self._after.append(frame)        # keep the words that follow the wake word

@@ -20,7 +20,8 @@ window says so, offers **Start Vex** (starts the supervisor quietly), and reconn
 | Tools & permissions | built |
 | Conversations | built |
 | Tasks & reminders | built |
-| Voice, System & health, Budget | next |
+| Voice | built |
+| System & health, Budget | next |
 
 ### Home
 * **Header:** a status chip ("Listening for 'Hey Vex'", "Still listening", "Microphone muted"...), the follow-up window length, and
@@ -77,6 +78,17 @@ anything is stored. Older sessions are dropped when Vex starts and once a day. B
 * **Reminders**: what and when ("in 20 minutes", "tomorrow 9am", "every weekday at 9:30"), each with its next time and repeat rule;
   Cancel removes one.
 * Every change goes through Vex's own tools, exactly as if you'd said it: audited, and deleting a task asks first on Vex's screen.
+
+### Voice
+* **Wake word:** a live microphone meter and the "Hey Vex" score against the threshold line (say it and watch it cross), and a
+  sensitivity slider (right = wakes more easily; it sets `[wakeword] threshold`, 0.05-0.95).
+* **Follow-up:** on/off and the window length (2-30 s).
+* **Vex's voice:** the edge-tts voices from `[voice] edge_candidates`; **Preview** says a sample sentence (only while Vex is idle) without
+  changing anything; picking one switches Vex's voice at once.
+* Every change takes effect immediately and is saved to `config.toml`. Out-of-range values and unlisted voices are refused.
+* **Response time per voice turn:** the last 40 turns, one column each (you stopped talking -> first word), with the median line; hover
+  (or focus the chart and use the arrow keys) for a turn's time, how it started and its stages; **Table** shows every number as text.
+  (Turns before 2026-10-04 23:00 still include time spent answering confirmations; newer ones don't.)
 
 ## Look
 Base `#0b0c0e`. Panels: brushed gunmetal (`shaders/panel.frag`: gradient `#1b1d21`->`#141619`, very faint vertical brush lines, 1px

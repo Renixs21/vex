@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     from vex_app import paths
     from vex_app.client import ApiClient
     from vex_app.single import SingleInstance, ask_running_to_focus
-    from vex_app.viewmodels import (ConversationsModel, HomeModel, MemoryModel, StatusModel, TasksModel, ToolsModel,
+    from vex_app.viewmodels import (ConversationsModel, HomeModel, MemoryModel, StatusModel, TasksModel, ToolsModel, VoiceModel,
                                     start_vex_process)
 
     from PySide6.QtCore import QCoreApplication, Qt
@@ -70,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
     conversations = ConversationsModel(client)
     tasks_model = TasksModel(client)
     tasks_model.toast.connect(status.toast)
+    voice_model = VoiceModel(client)
+    voice_model.toast.connect(status.toast)
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
     ctx.setContextProperty("vex", status)
@@ -78,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     ctx.setContextProperty("tools", tools)
     ctx.setContextProperty("conversations", conversations)
     ctx.setContextProperty("tasksModel", tasks_model)
+    ctx.setContextProperty("voiceModel", voice_model)
     ctx.setContextProperty("appPaths", {"icons": QUrl.fromLocalFile(str(paths.ICONS) + "/").toString(),
                                         "shaders": QUrl.fromLocalFile(str(paths.SHADERS) + "/").toString(),
                                         "web": QUrl.fromLocalFile(str(paths.WEB) + "/").toString()})
