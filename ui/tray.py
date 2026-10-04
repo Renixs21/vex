@@ -75,6 +75,7 @@ class TrayController(QObject):
         self.on_open_memory: Callable[[], None] | None = None       # set by the app: opens the memory viewer window
         self.on_health: Callable[[], tuple[str, str]] | None = None  # set by the app: runs the health check, returns (summary, report path)
         self._health_running = False
+        self.on_open_control_center: Callable[[], object] | None = None   # set by the app: python -m vex_app
         self.visible = True
         self.quiet_until = 0.0                                      # monotonic time; until then ordinary notifications are only logged
         if autostart_api is None:
@@ -89,6 +90,7 @@ class TrayController(QObject):
         self.status_action = self._add("status", "Vex: Ready", enabled=False)
         self.hotkey_action = self._add("hotkey", f"Hotkey {hotkey_text}", enabled=False)
         self.wakeword_action = self._add("wakeword_status", "Wake word: not available", enabled=False)
+        self._add("control_center", "Open Control Center", self._open_control_center)
         self._add("listen", "Listen now", self._listen)
         self._add("type", "Type a command", self._type_command)
         self.menu.addSeparator()
@@ -181,7 +183,7 @@ class TrayController(QObject):
             act.blockSignals(True)
             act.setChecked(muted)
             act.blockSignals(False)
-        self._on_state(self.controller.state)
+        self._on_state(getattr(self.controller, "state", "idle"))
 
     def _on_state(self, state: str) -> None:
         if self.controller.mic_muted:
@@ -194,6 +196,10 @@ class TrayController(QObject):
     def _activated(self, reason) -> None:
         if reason == QSystemTrayIcon.DoubleClick:
             self._listen()
+
+    def _open_control_center(self) -> None:
+        if self.on_open_control_center is not None:
+            self.on_open_control_center()
 
     def _listen(self) -> None:
         self.controller.start_listening("tray")

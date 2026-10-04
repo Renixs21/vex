@@ -40,6 +40,7 @@ watchdog                    # re-index when notes are edited by hand
 python-ulid                 # stable note ids
 markdown                    # render notes in the memory viewer (deferred)
 pytest                      # tests
+pytest-qt==4.5.0            # Control Center view-model and QML tests (qtbot)
 
 # --- Orb (vex_ui/) ---
 moderngl                    # GPU shader for the marbled orb

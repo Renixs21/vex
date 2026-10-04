@@ -259,6 +259,14 @@ class DockWindow(QWidget):
     def leaveEvent(self, e):
         self.r.set_hover(False)
 
+    def mouseDoubleClickEvent(self, e):
+        """Double-click: open the Control Center (Vex launches it; the first click's listening turn is cancelled)."""
+        if e.button() == Qt.LeftButton:
+            try:
+                self.notify.sendto(json.dumps({"event": "open_control_center"}).encode(), ("127.0.0.1", self.args.notify_port))
+            except OSError:
+                pass
+
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton and self.r.docked:
             self._clicked_wake()

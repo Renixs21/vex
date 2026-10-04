@@ -39,7 +39,8 @@ class ApiCore:
     def __init__(self, *, controller, executor=None, tray=None, memory_factory: Callable[[], Any] | None = None,
                  dialog_confirmer=None, housekeeper=None, health_fn: Callable[[], dict] | None = None,
                  logs: Path | None = None, data: Path | None = None, budget_cfg: dict | None = None,
-                 latency_path: Path | None = None):
+                 latency_path: Path | None = None, status_fn: Callable[[], dict] | None = None, hotkey: str = "",
+                 clock: Callable[[], float] = time.time):
         self.controller = controller
         self.executor = executor
         self.tray = tray
@@ -47,6 +48,11 @@ class ApiCore:
         self.dialog_confirmer = dialog_confirmer        # the on-screen dialog: the only way a red tool is switched back on
         self.housekeeper = housekeeper
         self.health_fn = health_fn
+        self.status_fn = status_fn                      # the app's live status (wake word, orb, hotkey...): app_status()
+        self.hotkey = hotkey
+        self._clock = clock
+        self.started_at = clock()
+        self.last_health: dict | None = None
         from config import ROOT, settings
 
         self.logs = logs or ROOT / settings["paths"]["logs"]
@@ -68,6 +74,7 @@ class ApiCore:
             "tools.list": self.tools_list, "tools.enable": self.tools_enable, "tools.disable": self.tools_disable,
             "health": self.health, "latency": self.latency, "autostart.get": self.autostart_get, "autostart.set": self.autostart_set,
             "budget": self.budget, "commands": lambda a: sorted(self.commands),
+            "health.last": self.health_last, "reminders.list": self.reminders_list, "tasks.list": self.tasks_list,
         }
 
     # ---- wiring (called by the app once) ------------------------------------------------------------------------------------
@@ -127,8 +134,17 @@ class ApiCore:
             shown = "asleep"
         else:
             shown = raw if raw in STATES else "idle"
+        extra: dict = {}
+        if self.status_fn is not None:
+            try:
+                extra = self.status_fn() or {}
+            except Exception:  # noqa: BLE001
+                extra = {}
         return {"state": shown, "controller_state": raw, "muted": bool(c.mic_muted), "asleep": bool(getattr(c, "asleep", False)),
                 "followup_open": raw == "followup", "followup_enabled": bool(getattr(c, "followup_enabled", False)),
+                "followup_seconds": float(getattr(c, "followup_seconds", 0) or 0),
+                "wakeword": extra.get("wakeword", "off"), "hotkey": self.hotkey, "hotkey_ok": bool(extra.get("hotkey", False)),
+                "orb": extra.get("orb"), "uptime_s": int(self._clock() - self.started_at),
                 "current_tool": self.current_tool, "confirm": self.pending_confirm}
 
     def text(self, args: dict) -> dict:
@@ -346,9 +362,42 @@ class ApiCore:
 
     # ---- health, latency, autostart, budget -----------------------------------------------------------------------------------------
     def health(self, args: dict) -> dict:
+        """Run the free health check now (a few seconds: it records 1 s of the microphone). The result is kept for health.last."""
         if self.health_fn is None:
             raise ApiError("the health check isn't available")
-        return self.health_fn()
+        r = dict(self.health_fn())
+        r["at"] = _now()
+        self.last_health = r
+        return r
+
+    def health_last(self, args: dict) -> dict | None:
+        """The last health check result (None if none ran yet this session): cheap, for a dashboard tile."""
+        return self.last_health
+
+    # ---- reminders & tasks ------------------------------------------------------------------------------------------------------------
+    def reminders_list(self, args: dict) -> list[dict]:
+        from tools import reminders
+
+        out = []
+        for i in reminders.pending():
+            rule = i.get("repeat")
+            out.append({"id": i.get("id"), "text": i.get("text", ""), "due": i.get("due"),
+                        "repeat": reminders.describe_rule(rule) if rule else None})
+        return out
+
+    def tasks_list(self, args: dict) -> list[dict]:
+        from tools import tasks
+
+        try:
+            vault, path = tasks._open()                    # noqa: SLF001 - the task list's own reader
+            body = vault.read(path).body
+        except Exception:  # noqa: BLE001
+            return []
+        out = []
+        for _, done, text in tasks._tasks(body):           # noqa: SLF001
+            t, due = tasks.split_due(text)
+            out.append({"text": t, "due": due or None, "done": done})
+        return out
 
     def latency(self, args: dict) -> dict:
         tools_dev = Path(__file__).resolve().parent.parent / "tools_dev"

@@ -18,7 +18,26 @@ def pretty_combo(combo: str) -> str:
     return "+".join(p.capitalize() if len(p) > 1 else p.upper() for p in combo.lower().replace("windows", "win").split("+"))
 
 
-def build_visual(ui_cfg: dict, pill, on_click, notify):
+def open_control_center() -> bool:
+    """Start the Control Center (python -m vex_app), detached. If it is already open it just comes to the front."""
+    import subprocess
+
+    import config
+
+    exe = Path(sys.executable)
+    pyw = exe.with_name("pythonw.exe")
+    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        subprocess.Popen([str(pyw if pyw.exists() else exe), "-m", "vex_app"], cwd=str(config.ROOT), creationflags=flags,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+        log.info("opening the Control Center")
+        return True
+    except OSError:
+        log.exception("could not start the Control Center")
+        return False
+
+
+def build_visual(ui_cfg: dict, pill, on_click, notify, on_open=None):
     """The visual(s) to drive: the orb app (default), the Qt pill, or both. Falls back to the pill if the orb can't start.
 
     Returns (frontend, OrbProcess | None, ClickListener | None).
@@ -39,7 +58,7 @@ def build_visual(ui_cfg: dict, pill, on_click, notify):
         return pill, None, None
     clicks = None
     try:
-        clicks = ClickListener(ui_cfg["orb_click_port"], on_click)
+        clicks = ClickListener(ui_cfg["orb_click_port"], on_click, on_open=on_open)
         clicks.start()
     except OSError as e:                                         # port taken: the orb still works, just without click-to-talk
         log.warning("click port %s unavailable (%s); clicking the orb won't start listening", ui_cfg["orb_click_port"], e)
@@ -174,7 +193,8 @@ def build_api(controller, executor, tray, tracker, dialog, housekeeper, status):
                     "checks": [{"name": c.name, "status": c.status, "detail": redact(c.detail), "hint": redact(c.hint)} for c in checks]}
 
         core = ApiCore(controller=controller, executor=executor, tray=tray, memory_factory=memory_tools.get_memory,
-                       dialog_confirmer=dialog, housekeeper=housekeeper, health_fn=health_fn)
+                       dialog_confirmer=dialog, housekeeper=housekeeper, health_fn=health_fn, status_fn=status,
+                       hotkey=pretty_combo(config.settings["ui"]["hotkey"]))
         core.attach()
         tracker.watchers.append(core.on_confirm)
         server = ApiServer(core, load_or_create_token(config.ROOT / "data" / "api_token"), port=int(cfg.get("port", 47480)),
@@ -332,7 +352,13 @@ def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: in
 
     pill = QtPillFrontend(on_click=lambda src: holder["controller"].start_listening(src),
                           caption_seconds=float(ui_cfg["caption_seconds"]))
-    frontend, orb, clicks = build_visual(ui_cfg, pill, lambda src: holder["controller"].start_listening(src), notify)
+    def open_cc_from_pill() -> None:
+        if "controller" in holder:
+            holder["controller"].cancel_capture()          # the double-click's first click started listening: not wanted
+        open_control_center()
+
+    frontend, orb, clicks = build_visual(ui_cfg, pill, lambda src: holder["controller"].start_listening(src), notify,
+                                         on_open=open_cc_from_pill)
     typed = TextPromptCapture()
 
     # voice: recorder + Whisper + TTS chain; the typed prompt stays available as the fallback and from the tray
@@ -415,6 +441,7 @@ def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: in
         holder["viewer"].show_and_raise()
 
     tray.on_open_memory = open_viewer
+    tray.on_open_control_center = open_control_center
     hotkey = GlobalHotkey(ui_cfg["hotkey"], controller.start_listening, on_error=tray.notify)
     wake = build_wakeword(controller, stack, tray.notify)
     if wake is not None:

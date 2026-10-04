@@ -233,12 +233,14 @@ class OrbProcess:
 class ClickListener:
     """UDP listener for the orb's {"click": true}: calls on_click("orb-click"). Ignores anything else."""
 
-    def __init__(self, port: int, on_click: Callable[[str], object], host: str = "127.0.0.1"):
+    def __init__(self, port: int, on_click: Callable[[str], object], host: str = "127.0.0.1",
+                 on_open: Callable[[], object] | None = None):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind((host, port))
         self.sock.settimeout(0.3)
         self.port = self.sock.getsockname()[1]
         self.on_click = on_click
+        self.on_open = on_open                    # a double-click on the pill: open the Control Center
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="orb-clicks", daemon=True)
 
@@ -263,6 +265,14 @@ class ClickListener:
                 msg = json.loads(data.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError):
                 log.info("click port %d: datagram from %s:%d %r -> ignored (not JSON)", self.port, addr[0], addr[1], raw)
+                continue
+            if isinstance(msg, dict) and msg.get("event") == "open_control_center":
+                log.info("click port %d: double-click on the pill -> opening the Control Center", self.port)
+                if self.on_open is not None:
+                    try:
+                        self.on_open()
+                    except Exception:  # noqa: BLE001
+                        log.exception("opening the Control Center failed")
                 continue
             if isinstance(msg, dict) and (msg.get("click") is True or msg.get("event") == "wake_clicked"):   # overlay / dock
                 log.info("click port %d: datagram from %s:%d %r -> orb click, starting a listening turn", self.port, addr[0], addr[1], raw)

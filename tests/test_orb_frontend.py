@@ -357,7 +357,7 @@ def fake_orb(monkeypatch):
             self.on_giveup = on_giveup
 
     monkeypatch.setattr(of, "OrbProcess", FakeOrbProcess)
-    monkeypatch.setattr(of, "ClickListener", lambda port, cb: SimpleNamespace(start=lambda: None, stop=lambda: None, port=port))
+    monkeypatch.setattr(of, "ClickListener", lambda port, cb, **kw: SimpleNamespace(start=lambda: None, stop=lambda: None, port=port))
     return state
 
 

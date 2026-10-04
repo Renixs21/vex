@@ -408,7 +408,7 @@ def tray(tmp_path, qapp, monkeypatch):
 
 def test_tray_menu_has_every_requested_item(tray):
     labels = {k: a.text() for k, a in tray.actions.items()}
-    assert set(tray.actions) == {"status", "hotkey", "wakeword_status", "listen", "type", "show", "mute", "wakeword", "followup", "autostart", "dry_run", "health", "memory", "logs", "quit"}
+    assert set(tray.actions) == {"status", "hotkey", "wakeword_status", "control_center", "listen", "type", "show", "mute", "wakeword", "followup", "autostart", "dry_run", "health", "memory", "logs", "quit"}
     assert labels["listen"] == "Listen now" and "memory" in labels["memory"].lower() and labels["quit"].startswith("Quit")
     assert [tray.actions[k].isCheckable() for k in ("show", "mute", "wakeword", "autostart", "dry_run")] == [True] * 5
     assert tray.actions["show"].isChecked() and tray.actions["wakeword"].isChecked()

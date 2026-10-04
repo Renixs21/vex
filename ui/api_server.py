@@ -203,12 +203,18 @@ class ApiServer:
             return
         try:
             data = await asyncio.get_running_loop().run_in_executor(None, fn, args)      # Vex's own code never runs on this loop
-            await ws.send_json({"id": rid, "ok": True, "data": data}, dumps=lambda o: json.dumps(o, default=str))
+            reply = {"id": rid, "ok": True, "data": data}
         except ApiError as e:
-            await ws.send_json({"id": rid, "ok": False, "error": str(e)})
+            reply = {"id": rid, "ok": False, "error": str(e)}
         except Exception as e:  # noqa: BLE001
             log.exception("local API command %s failed", cmd)
-            await ws.send_json({"id": rid, "ok": False, "error": f"{cmd} failed: {type(e).__name__}"})
+            reply = {"id": rid, "ok": False, "error": f"{cmd} failed: {type(e).__name__}"}
+        if ws.closed:                                                   # the client left while the command ran: nobody to tell
+            return
+        try:
+            await ws.send_json(reply, dumps=lambda o: json.dumps(o, default=str))
+        except (ConnectionError, RuntimeError) as e:                   # it left just now
+            log.debug("local API: client gone before the reply (%s)", type(e).__name__)
 
     # ---- events ---------------------------------------------------------------------------------------------------------------------
     def broadcast(self, event: dict) -> None:
