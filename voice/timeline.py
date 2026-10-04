@@ -34,6 +34,7 @@ class Timeline:
         self._lock = threading.Lock()
         self._wake_t: float | None = None
         self._turn: dict | None = None
+        self.listeners: list = []                                   # fn(record) after each finished turn
 
     def configure(self, path: Path | None) -> None:
         self.path = Path(path) if path else None
@@ -99,6 +100,11 @@ class Timeline:
         rec = summarize(turn, outcome)
         rec["ts"] = datetime.now().astimezone().isoformat(timespec="seconds")
         self._write(rec)
+        for fn in list(self.listeners):                             # e.g. the conversation log pairs timings with turns
+            try:
+                fn(rec)
+            except Exception:  # noqa: BLE001
+                log.debug("timeline listener failed", exc_info=True)
         return rec
 
     def _write(self, rec: dict) -> None:

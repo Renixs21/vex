@@ -18,7 +18,8 @@ window says so, offers **Start Vex** (starts the supervisor quietly), and reconn
 | Home | built |
 | Memory | built |
 | Tools & permissions | built |
-| Conversations, Tasks & reminders, Voice, System & health, Budget | after that |
+| Conversations | built |
+| Tasks & reminders, Voice, System & health, Budget | next |
 
 ### Home
 * **Header:** a status chip ("Listening for 'Hey Vex'", "Still listening", "Microphone muted"...), the follow-up window length, and
@@ -59,6 +60,15 @@ Tabs **Focus | Galaxy | Timeline | Notes** and a search box (results drop down; 
   a deleted file) reverses the one action "undo that" would reverse, through Vex's normal safety pipeline.
 * **How tiers work**: green runs at once; yellow asks first (voice, hotkey or screen); red always shows the exact command or path on
   Vex's screen, never by voice and never from this app.
+
+### Conversations
+Sessions on the left (one wake-up and its follow-ups; newest first, with turns, median response time and the tools used), the transcript
+of the chosen one on the right: what you said, the tools Vex used on the way (tier dot, mono; a declined one says so), the reply, and
+the turn's timing (total, speech recognition, brain, first sound).
+
+**What is kept:** your words and Vex's replies, in memory and in `data\conversations.jsonl` (gitignored), for
+`[api] keep_conversations_days` (14; `0` keeps them only until Vex stops). Passwords, keys, card numbers and the like are redacted before
+anything is stored. Older sessions are dropped when Vex starts and once a day. Before this, Vex kept only daily summaries.
 
 ## Look
 Base `#0b0c0e`. Panels: brushed gunmetal (`shaders/panel.frag`: gradient `#1b1d21`->`#141619`, very faint vertical brush lines, 1px

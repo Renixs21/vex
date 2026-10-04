@@ -45,6 +45,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "enabled": True,                 # the local websocket API for companion apps (docs/API.md); 127.0.0.1 only, token in data/api_token
         "port": 47480,
         "allowed_origins": [],           # browser origins allowed to connect (none by default)
+        "keep_conversations_days": 14,   # the Control Center's conversation history (data/conversations.jsonl, secrets redacted); 0 = memory only
     },
     "budget": {
         "budget_inr": 1000,              # the most you're willing to spend (Google asked for a 1000 rupee prepayment for Cloud TTS)

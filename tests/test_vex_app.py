@@ -14,7 +14,7 @@ pytest.importorskip("pytestqt")
 from ui.api_core import ApiCore                                     # noqa: E402 - the test side may use Vex; the app may not
 from ui.api_server import ApiServer                                  # noqa: E402
 from vex_app.client import ApiClient                                 # noqa: E402
-from vex_app.viewmodels import HomeModel, MemoryModel, StatusModel, ToolsModel   # noqa: E402
+from vex_app.viewmodels import ConversationsModel, HomeModel, MemoryModel, StatusModel, ToolsModel   # noqa: E402
 
 TOKEN = "z" * 43
 APP_DIR = Path(__file__).resolve().parent.parent / "vex_app"
@@ -212,6 +212,7 @@ def test_the_qml_loads_without_errors_connected_and_offline(qtbot, server):
         ctx.setContextProperty("home", home)
         ctx.setContextProperty("memory", MemoryModel(client))
         ctx.setContextProperty("tools", ToolsModel(client))
+        ctx.setContextProperty("conversations", ConversationsModel(client))
         ctx.setContextProperty("appPaths", {"icons": QUrl.fromLocalFile(str(paths.ICONS) + "/").toString(),
                                             "shaders": QUrl.fromLocalFile(str(paths.SHADERS) + "/").toString(),
                                             "web": QUrl.fromLocalFile(str(paths.WEB) + "/").toString()})
@@ -451,3 +452,31 @@ def test_restore_is_the_word_for_an_undone_delete(qtbot):
     t = ToolsModel(ApiClient(1, lambda: ""))
     t._undo = {"audit_id": "x", "kind": "deleted", "label": "Deleted old.txt"}
     assert t.undoInfo["verb"] == "Restore"
+
+
+# ---- the conversations model ----------------------------------------------------------------------------------------------------------
+def test_conversations_model_lists_and_opens_sessions(qtbot, tmp_path):
+    from ui.conversations import ConversationLog
+
+    c, *_ = make()
+    log = ConversationLog(tmp_path / "c.jsonl", keep_days=14)
+    log.start_session()
+    log.add_tool({"event": "tool_end", "tool": "get_weather", "tier": "green", "decision": "auto", "ok": True})
+    log.add_turn("weather in Paris?", "18 degrees and sunny.")
+    log.add_timing({"outcome": "spoken", "source": "wakeword", "stages": {"total": 3.1, "stt": 0.8, "brain": 1.2, "tts_first_audio": 0.6}})
+    log.end_session()
+    core = ApiCore(controller=c, conversations=log, logs=tmp_path, data=tmp_path)
+    srv = ApiServer(core, TOKEN, port=0)
+    assert srv.start()
+    try:
+        client = connect(qtbot, srv.bound_port)
+        m = ConversationsModel(client)
+        qtbot.waitUntil(lambda: bool(m.sessions) and bool(m.detail.get("turns")), timeout=8000)
+        row = m.sessions[0]
+        assert row["first"] == "weather in Paris?" and row["turns"] == 1 and row["latency"] == "3.1 s" and row["tools"] == ["get_weather"]
+        t = m.detail["turns"][0]
+        assert t["reply"] == "18 degrees and sunny." and t["tools"][0]["tool"] == "get_weather" and t["via"] == "wakeword"
+        assert t["latency"].startswith("total 3.1 s") and "first sound 0.6 s" in t["latency"]
+        client.stop()
+    finally:
+        srv.stop()

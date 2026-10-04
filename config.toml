@@ -44,6 +44,7 @@ orb_click_port = 47475               # orb -> Vex: clicking the orb starts liste
 enabled = true                       # local websocket API for companion apps (docs/API.md): 127.0.0.1 only, token in data/api_token
 port = 47480
 allowed_origins = []                 # browser origins allowed to connect (none)
+keep_conversations_days = 14         # conversation history for the Control Center (data/conversations.jsonl, secrets redacted); 0 = memory only
 
 [budget]
 budget_inr = 1000                    # what you're willing to spend: only Google Cloud TTS (off by default) can cost money

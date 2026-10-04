@@ -39,7 +39,7 @@ class ApiCore:
     def __init__(self, *, controller, executor=None, tray=None, memory_factory: Callable[[], Any] | None = None,
                  dialog_confirmer=None, housekeeper=None, health_fn: Callable[[], dict] | None = None,
                  logs: Path | None = None, data: Path | None = None, budget_cfg: dict | None = None,
-                 latency_path: Path | None = None, status_fn: Callable[[], dict] | None = None, hotkey: str = "",
+                 latency_path: Path | None = None, status_fn: Callable[[], dict] | None = None, hotkey: str = "", conversations=None,
                  clock: Callable[[], float] = time.time):
         self.controller = controller
         self.executor = executor
@@ -49,6 +49,7 @@ class ApiCore:
         self.housekeeper = housekeeper
         self.health_fn = health_fn
         self.status_fn = status_fn                      # the app's live status (wake word, orb, hotkey...): app_status()
+        self.conversations = conversations              # ui.conversations.ConversationLog (None: no history)
         self.hotkey = hotkey
         self._clock = clock
         self.started_at = clock()
@@ -77,6 +78,7 @@ class ApiCore:
             "health": self.health, "latency": self.latency, "autostart.get": self.autostart_get, "autostart.set": self.autostart_set,
             "budget": self.budget, "commands": lambda a: sorted(self.commands),
             "health.last": self.health_last, "reminders.list": self.reminders_list, "tasks.list": self.tasks_list,
+            "conversations.list": self.conversations_list, "conversations.get": self.conversations_get,
         }
 
     # ---- wiring (called by the app once) ------------------------------------------------------------------------------------
@@ -88,6 +90,16 @@ class ApiCore:
         c.on_turn.append(lambda said, reply: self._add_activity("turn", said=said[:MAX_TEXT], reply=(reply or "")[:MAX_TEXT]))
         if self.executor is not None:
             self.executor.listeners.append(self._on_tool)
+        if self.conversations is not None:
+            from voice.timeline import timeline
+
+            cv = self.conversations
+            c.on_interaction_start.append(cv.start_session)
+            c.on_turn.append(cv.add_turn)
+            c.on_interaction_end.append(cv.end_session)
+            timeline.listeners.append(cv.add_timing)
+            if self.executor is not None:
+                self.executor.listeners.append(cv.add_tool)
 
     def on_confirm(self, req, answer=None) -> None:
         """Called by the app's confirmation tracker: a prompt is showing (answer None) or was answered. Display only."""
@@ -456,6 +468,18 @@ class ApiCore:
     def health_last(self, args: dict) -> dict | None:
         """The last health check result (None if none ran yet this session): cheap, for a dashboard tile."""
         return self.last_health
+
+    # ---- conversations --------------------------------------------------------------------------------------------------------------
+    def conversations_list(self, args: dict) -> list[dict]:
+        if self.conversations is None:
+            return []
+        return self.conversations.list(max(1, min(200, int(args.get("limit", 50)))))
+
+    def conversations_get(self, args: dict) -> dict:
+        s = self.conversations.get(str(args.get("id", ""))) if self.conversations is not None else None
+        if s is None:
+            raise ApiError("no such conversation")
+        return s
 
     # ---- reminders & tasks ------------------------------------------------------------------------------------------------------------
     def reminders_list(self, args: dict) -> list[dict]:

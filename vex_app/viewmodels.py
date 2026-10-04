@@ -684,3 +684,86 @@ class ToolsModel(QObject):
                 "verb": "Restore" if u.get("kind") == "deleted" else "Undo"}
 
     undoInfo = Property("QVariantMap", _undo_view, notify=changed)
+
+
+def _clock_text(ts: str, with_date: bool = False) -> str:
+    try:
+        dt = datetime.fromisoformat(str(ts))
+    except ValueError:
+        return str(ts)[:16]
+    today = datetime.now(dt.tzinfo).date()
+    if dt.date() == today and not with_date:
+        return dt.strftime("%H:%M")
+    if dt.date() == today:
+        return "Today " + dt.strftime("%H:%M")
+    if (today - dt.date()).days == 1:
+        return "Yesterday " + dt.strftime("%H:%M")
+    return dt.strftime("%a %d %b %H:%M")
+
+
+class ConversationsModel(QObject):
+    """Conversations: sessions (a wake-up and its follow-ups) with the transcript, tools used and per-turn latency."""
+
+    changed = Signal()
+    detailChanged = Signal()
+
+    def __init__(self, client: ApiClient, parent=None):
+        super().__init__(parent)
+        self.client = client
+        self._sessions: list = []
+        self._detail: dict = {}
+        self._selected = ""
+        self._debounce = QTimer(self)
+        self._debounce.setSingleShot(True)
+        self._debounce.setInterval(1500)
+        self._debounce.timeout.connect(self.refresh)
+        client.connectedChanged.connect(lambda: client.connected and self.refresh())
+        client.event.connect(self._on_event)
+
+    def _on_event(self, name: str, data) -> None:
+        if name == "state" and isinstance(data, dict) and data.get("state") in ("idle", "asleep", "muted"):
+            self._debounce.start()                              # a session may just have ended
+
+    @Slot()
+    def refresh(self) -> None:
+        if self.client.connected:
+            self.client.call("conversations.list", {"limit": 100}, self._got_list)
+
+    def _got_list(self, ok: bool, data, err: str) -> None:
+        if not ok:
+            return
+        rows = []
+        for s in data or []:
+            mt = s.get("median_total")
+            rows.append({"id": s["id"], "when": _clock_text(s["start"], with_date=True), "first": s.get("first") or "",
+                         "turns": int(s.get("turns", 0)), "tools": s.get("tools") or [],
+                         "latency": "" if mt is None else f"{mt:.1f} s"})
+        self._sessions = rows
+        self.changed.emit()
+        if rows and (not self._selected or not any(r["id"] == self._selected for r in rows)):
+            self.select(rows[0]["id"])
+
+    @Slot(str)
+    def select(self, session_id: str) -> None:
+        self._selected = session_id
+        self.changed.emit()
+        self.client.call("conversations.get", {"id": session_id}, self._got_detail)
+
+    def _got_detail(self, ok: bool, data, err: str) -> None:
+        if not ok:
+            return
+        turns = []
+        for t in (data or {}).get("turns", []):
+            lat = t.get("latency") or {}
+            parts = [f"{k} {lat[key]:.1f} s" for k, key in (("total", "total"), ("stt", "stt"), ("brain", "brain"),
+                                                             ("first sound", "tts_first_audio")) if key in lat]
+            turns.append({"time": _clock_text(t.get("ts", "")), "said": t.get("said", ""), "reply": t.get("reply", ""),
+                          "tools": [{"tool": x.get("tool"), "tier": x.get("tier") or "", "ok": bool(x.get("ok")),
+                                     "decision": x.get("decision") or ""} for x in t.get("tools", [])],
+                          "latency": " · ".join(parts), "via": t.get("via") or ""})
+        self._detail = {"id": (data or {}).get("id"), "when": _clock_text((data or {}).get("start", ""), with_date=True), "turns": turns}
+        self.detailChanged.emit()
+
+    sessions = Property("QVariantList", lambda self: self._sessions, notify=changed)
+    selected = Property(str, lambda self: self._selected, notify=changed)
+    detail = Property("QVariantMap", lambda self: self._detail, notify=detailChanged)

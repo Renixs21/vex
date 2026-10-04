@@ -192,7 +192,11 @@ def build_api(controller, executor, tray, tracker, dialog, housekeeper, status):
             return {"summary": redact(health.summary_line(checks)),
                     "checks": [{"name": c.name, "status": c.status, "detail": redact(c.detail), "hint": redact(c.hint)} for c in checks]}
 
-        core = ApiCore(controller=controller, executor=executor, tray=tray, memory_factory=memory_tools.get_memory,
+        from ui.conversations import ConversationLog
+
+        keep = int(cfg.get("keep_conversations_days", 14))
+        conversations = ConversationLog(config.ROOT / "data" / "conversations.jsonl", keep_days=keep)
+        core = ApiCore(controller=controller, executor=executor, tray=tray, memory_factory=memory_tools.get_memory, conversations=conversations,
                        dialog_confirmer=dialog, housekeeper=housekeeper, health_fn=health_fn, status_fn=status,
                        hotkey=pretty_combo(config.settings["ui"]["hotkey"]))
         core.attach()
