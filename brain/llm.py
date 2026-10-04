@@ -90,6 +90,23 @@ def _retryable(e: BaseException) -> bool:
     return _status(e) in (429, 500, 502, 503, 504)
 
 
+TOOL_REMINDER = ("\nCall only the tools in the provided tool list, using exactly their names. If you need a capability that "
+                 "isn't listed, call more_tools with its category.\n")
+
+
+def _tool_use_failed(e: BaseException) -> bool:
+    """Groq's HTTP 400 'tool_use_failed': the model called a tool outside request.tools or produced a malformed call."""
+    body = getattr(e, "body", None)
+    err = body.get("error", body) if isinstance(body, dict) else {}
+    return _status(e) == 400 and isinstance(err, dict) and err.get("code") == "tool_use_failed"
+
+
+def _failed_call(e: BaseException) -> str:
+    body = getattr(e, "body", None)
+    err = body.get("error", body) if isinstance(body, dict) else {}
+    return str(err.get("failed_generation", ""))[:80] if isinstance(err, dict) else ""
+
+
 def _provider_down(e: BaseException) -> bool:
     """True when the provider itself is the problem (limits, outage, bad key, network), not this one request."""
     name = type(e).__name__.lower()
@@ -274,7 +291,16 @@ class GroqClient:
             return self.client.chat.completions.create(model=self.model, messages=msgs, **kwargs)
 
         t0 = time.monotonic()
-        resp = with_retries(call, self.attempts, self.fail_over_after)
+        try:
+            resp = with_retries(call, self.attempts, self.fail_over_after)
+        except Exception as e:  # noqa: BLE001
+            if not _tool_use_failed(e):
+                raise
+            # The model called a tool that wasn't offered (e.g. 'shell.exec'); Groq rejects that with HTTP 400. Retry once
+            # with a reminder instead of dropping to the next provider.
+            log.warning("%s called a tool that wasn't offered (%s); retrying with a reminder", self.name, _failed_call(e))
+            msgs = self._messages(system + TOOL_REMINDER, messages)
+            resp = with_retries(call, self.attempts, self.fail_over_after)
         msg = resp.choices[0].message
         calls = []
         for c in msg.tool_calls or []:

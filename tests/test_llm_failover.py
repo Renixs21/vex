@@ -415,3 +415,66 @@ def test_gemini_calls_keep_their_own_signed_content():
     contents = g._contents([{"role": "user", "text": "hi"}, {"role": "assistant", "text": "", "tool_calls": [], "raw": own,
                                                               "raw_provider": "gemini"}])
     assert contents[1] is own and contents[1].parts[0].thought_signature == b"real"
+
+
+def _tool_use_failed_error():
+    import groq
+    import httpx
+
+    body = {"error": {"message": "attempted to call tool 'shell.exec' which was not in request.tools",
+                      "type": "invalid_request_error", "code": "tool_use_failed",
+                      "failed_generation": '{"name": "shell.exec", "arguments": {}}'}}
+    resp = httpx.Response(400, request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions"))
+    return groq.BadRequestError("Error code: 400", response=resp, body=body)
+
+
+def _groq_reply():
+    msg = SimpleNamespace(content="It is noon.", tool_calls=None)
+    return SimpleNamespace(choices=[SimpleNamespace(message=msg)], usage=None)
+
+
+def test_groq_retries_once_with_a_reminder_when_the_model_calls_an_unoffered_tool():
+    g = GroqClient("openai/gpt-oss-120b", "k", 1000, attempts=1)
+    seen = []
+
+    def create(model, messages, **kw):
+        seen.append(messages[0]["content"])
+        if len(seen) == 1:
+            raise _tool_use_failed_error()
+        return _groq_reply()
+
+    g.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    assert g.generate("sys", USER, []).text == "It is noon."
+    assert len(seen) == 2 and llm.TOOL_REMINDER in seen[1] and llm.TOOL_REMINDER not in seen[0]
+
+
+def test_groq_gives_up_after_one_reminder_so_the_ladder_can_move_on():
+    g = GroqClient("openai/gpt-oss-120b", "k", 1000, attempts=1)
+    calls = []
+
+    def create(**kw):
+        calls.append(1)
+        raise _tool_use_failed_error()
+
+    g.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    with pytest.raises(Exception):
+        g.generate("sys", USER, [])
+    assert len(calls) == 2
+
+
+def test_other_400s_are_not_retried():
+    import groq
+    import httpx
+
+    g = GroqClient("openai/gpt-oss-120b", "k", 1000, attempts=1)
+    calls = []
+
+    def create(**kw):
+        calls.append(1)
+        resp = httpx.Response(400, request=httpx.Request("POST", "https://x"))
+        raise groq.BadRequestError("bad", response=resp, body={"error": {"code": "invalid_request"}})
+
+    g.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    with pytest.raises(Exception):
+        g.generate("sys", USER, [])
+    assert len(calls) == 1
