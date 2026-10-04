@@ -71,7 +71,9 @@ is used by Vex. The scripts are in `tools_dev/wakeword_train/`.
 7. `eval_heldout.py output/hey_vex/hey_vex.onnx` scores your held-out clips through openWakeWord. Copy the .onnx to `models/hey_vex.onnx`.
 
 **First model (3000 samples, 12000 steps, 46 real positives):** held-out recall 46% at threshold 0.3 with 0 false wakes in 63 negative
-clips (54% at 0.2 with 4). Real data is what matters most: record more "hey vex" clips and retrain.
+clips (54% at 0.2 with 4). In real use at threshold 0.24 (config default now) it woke 10 times out of 10 spoken "Hey Vex"s
+(2026-10-04), more than the held-out test predicted. The 30,000-step / 8,000-sample run was started but stopped because the first model
+was good enough; more real "hey vex" clips are what to add if it ever misses.
 
 ## Troubleshooting
 - **False wakes**: raise `threshold` to 0.6-0.7, raise `cooldown`, or retrain with more negative data. TV and music can do it; the
