@@ -4,7 +4,7 @@ import time
 import pytest
 
 from test_ui_core import FakeAgent, FakeCapture, FakeSpeaker
-from ui.controller import IDLE, LISTENING, SPEAKING, THINKING, VexController, is_read_rest
+from ui.controller import IDLE, LISTENING, SPEAKING, THINKING, VexController, is_read_rest, is_sleep
 from ui.frontend import RecordingFrontend
 
 
@@ -157,3 +157,27 @@ def test_submit_text_error_returns_to_idle():
     c, f = make(agent=FakeAgent(fail=True))
     c.submit_text("boom")
     assert c.wait_idle() and c.state == IDLE and ("caption", "Something went wrong. Try again.") in f.calls
+
+
+@pytest.mark.parametrize("text", ["sleep", "Sleep.", "go to sleep", "please go to sleep", "go back to sleep", "sleep now", "dock",
+                                  "hide", "that's all", "Good night, Vex."])
+def test_sleep_phrases(text):
+    assert is_sleep(text)
+
+
+@pytest.mark.parametrize("text", ["", "sleep for 10 seconds", "how much sleep do I need", "hide my files", "open notepad",
+                                  "put the pc to sleep tonight"])
+def test_other_requests_are_not_sleep(text):
+    assert not is_sleep(text)
+
+
+def test_sleep_says_okay_then_sends_the_orb_back_to_the_pill_without_asking_the_llm():
+    sp = RestSpeaker()
+    c, f = make(sp, FakeCapture("go to sleep"))
+    assert c.start_listening() == "started" and c.wait_idle()
+    assert sp.spoken == ["Okay."] and c.agent.heard == []
+    ops = [op for op, _ in f.calls]
+    assert f.calls[-1] == ("hide", None) and ops.index("hide") > ops.index("state")
+    c.start_listening()                       # next turn is a normal one; the flag doesn't stick
+    c.wait_idle()
+    assert [op for op, _ in f.calls].count("hide") == 1

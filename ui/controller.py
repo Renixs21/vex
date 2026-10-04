@@ -32,6 +32,16 @@ _READ_REST = re.compile(
 
 from voice.wakeword import strip_wake_phrase  # noqa: E402
 
+_SLEEP = re.compile(r"^(?:please\s+)?(?:go\s+(?:back\s+)?to\s+sleep|go\s+to\s+the\s+edge|sleep(?:\s+now|\s+mode)?|"
+                    r"(?:you\s+can\s+)?(?:dock|hide|minimi[sz]e)(?:\s+(?:now|yourself))?|that(?:'|\s)?s\s+all|"
+                    r"good\s*night(?:\s+vex)?)(?:\s+(?:vex|please))?$")
+
+
+def is_sleep(text: str) -> bool:
+    """True for 'sleep', 'go to sleep', 'dock', 'that's all', ... : the orb shrinks back into the edge pill."""
+    t = re.sub(r"[^a-z\s']", " ", (text or "").lower())
+    return bool(_SLEEP.match(" ".join(t.split())))
+
 
 def is_read_rest(text: str) -> bool:
     """True for 'read the rest', 'say the rest', 'read it all', ... (case and punctuation ignored)."""
@@ -61,6 +71,7 @@ class VexController:
         self.state = IDLE
         self.mic_muted = False
         self.last_reply = ""
+        self._sleep_after = False
         self.on_interaction_start: list[Callable[[], None]] = []
         self.on_interaction_end: list[Callable[[], None]] = []
         self.listeners: list[Callable[[str], None]] = []       # called with the new state on every change
@@ -174,6 +185,10 @@ class VexController:
         finally:
             self._active_capture = None
             self._set_state(IDLE)
+            if self._sleep_after:                                # "sleep": the orb shrinks back into the edge pill
+                self._sleep_after = False
+                self.frontend.show_caption("")
+                self.frontend.hide()
             self._run_hooks(self.on_interaction_end, "end")
 
     def _turn(self, mode: str = "listen", given: str | None = None) -> None:
@@ -192,6 +207,11 @@ class VexController:
             text = text.strip()
             self.frontend.show_caption(f"“{text}”")
             if self._read_rest(text):
+                return
+            if is_sleep(text):
+                self._sleep_after = True
+                self._set_state(SPEAKING)
+                self.speaker.speak("Okay.", self.frontend.set_level)
                 return
             self._set_state(THINKING)
             reply = self.agent.run(text)

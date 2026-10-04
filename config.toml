@@ -31,7 +31,7 @@ orb_mode = "dock"                    # dock (pill on a screen edge <-> orb in th
 orb_edge = "right"                   # dock: right or left
 orb_edge_y = 0.40                    # dock: pill height, fraction from the top
 orb_center_y = 0.50                  # dock: where the orb lands, fraction from the top
-orb_radius = 62                      # dock: orb size in px
+orb_radius = 62.0                      # dock: orb size in px
 orb_position = "bottom"              # overlay: bottom, bottom-right, bottom-left, center, top-right
 orb_palette = "blue"                 # blue, default (grey), violet, emerald
 orb_size = ""                        # e.g. "420x340"; blank = the orb's default
