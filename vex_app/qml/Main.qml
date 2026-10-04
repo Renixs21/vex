@@ -42,7 +42,8 @@ Window {
             active: vex.connected
             sourceComponent: win.current === "home" ? homeComp : win.current === "memory" ? memoryComp
                            : win.current === "tools" ? toolsComp
-                           : win.current === "conversations" ? conversationsComp : placeholderComp
+                           : win.current === "conversations" ? conversationsComp
+                           : win.current === "tasks" ? tasksComp : placeholderComp
             opacity: 0
             onLoaded: { opacity = 0; slide.restart() }
             transform: Translate { id: shift; x: 0 }
@@ -59,6 +60,7 @@ Window {
     Component { id: memoryComp; Memory {} }
     Component { id: toolsComp; Tools {} }
     Component { id: conversationsComp; Conversations {} }
+    Component { id: tasksComp; Tasks {} }
     Component { id: placeholderComp; Placeholder { title: win.titles[win.current] || "" } }
 
     // a short message at the bottom (e.g. "Starting Vex...")

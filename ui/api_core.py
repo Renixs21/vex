@@ -79,6 +79,8 @@ class ApiCore:
             "budget": self.budget, "commands": lambda a: sorted(self.commands),
             "health.last": self.health_last, "reminders.list": self.reminders_list, "tasks.list": self.tasks_list,
             "conversations.list": self.conversations_list, "conversations.get": self.conversations_get,
+            "tasks.add": self.tasks_add, "tasks.complete": self.tasks_complete, "tasks.delete": self.tasks_delete,
+            "reminders.add": self.reminders_add, "reminders.cancel": self.reminders_cancel,
         }
 
     # ---- wiring (called by the app once) ------------------------------------------------------------------------------------
@@ -486,9 +488,9 @@ class ApiCore:
         from tools import reminders
 
         out = []
-        for i in reminders.pending():
+        for n, i in enumerate(reminders.pending(), 1):
             rule = i.get("repeat")
-            out.append({"id": i.get("id"), "text": i.get("text", ""), "due": i.get("due"),
+            out.append({"number": n, "id": i.get("id"), "text": i.get("text", ""), "due": i.get("due"),
                         "repeat": reminders.describe_rule(rule) if rule else None})
         return out
 
@@ -501,10 +503,39 @@ class ApiCore:
         except Exception:  # noqa: BLE001
             return []
         out = []
-        for _, done, text in tasks._tasks(body):           # noqa: SLF001
+        for n, (_, done, text) in enumerate(tasks._tasks(body), 1):     # noqa: SLF001 - numbered like list_tasks / complete_task
             t, due = tasks.split_due(text)
-            out.append({"text": t, "due": due or None, "done": done})
+            out.append({"number": n, "text": t, "due": due or None, "done": done})
         return out
+
+    def _run_tool(self, name: str, args: dict) -> dict:
+        """Through Vex's executor: the same safety tiers, confirmations and audit as when you ask by voice."""
+        if self.executor is None:
+            raise ApiError("not available")
+        r = self.executor.run(name, args)
+        self._add_activity("command", via="api", text=f"{name} {json.dumps(args, ensure_ascii=False)}"[:200])
+        return {"ok": bool(r.ok), "message": r.message}
+
+    def tasks_add(self, args: dict) -> dict:
+        text = " ".join(str(args.get("text", "")).split())
+        if not text:
+            raise ApiError("text is empty")
+        return self._run_tool("add_task", {"text": text[:300], "due": str(args.get("due", ""))[:80]})
+
+    def tasks_complete(self, args: dict) -> dict:
+        return self._run_tool("complete_task", {"task": str(int(args.get("number", 0)))})
+
+    def tasks_delete(self, args: dict) -> dict:
+        return self._run_tool("delete_task", {"task": str(int(args.get("number", 0)))})
+
+    def reminders_add(self, args: dict) -> dict:
+        text, when = " ".join(str(args.get("text", "")).split()), " ".join(str(args.get("when", "")).split())
+        if not text or not when:
+            raise ApiError("both text and when are needed (e.g. 'call mom', 'today at 7pm')")
+        return self._run_tool("set_reminder", {"text": text[:300], "when": when[:120]})
+
+    def reminders_cancel(self, args: dict) -> dict:
+        return self._run_tool("cancel_reminder", {"which": str(int(args.get("number", 0)))})
 
     def latency(self, args: dict) -> dict:
         tools_dev = Path(__file__).resolve().parent.parent / "tools_dev"

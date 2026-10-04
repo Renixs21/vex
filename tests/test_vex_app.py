@@ -14,7 +14,7 @@ pytest.importorskip("pytestqt")
 from ui.api_core import ApiCore                                     # noqa: E402 - the test side may use Vex; the app may not
 from ui.api_server import ApiServer                                  # noqa: E402
 from vex_app.client import ApiClient                                 # noqa: E402
-from vex_app.viewmodels import ConversationsModel, HomeModel, MemoryModel, StatusModel, ToolsModel   # noqa: E402
+from vex_app.viewmodels import ConversationsModel, HomeModel, MemoryModel, StatusModel, TasksModel, ToolsModel  # noqa: E402
 
 TOKEN = "z" * 43
 APP_DIR = Path(__file__).resolve().parent.parent / "vex_app"
@@ -213,6 +213,7 @@ def test_the_qml_loads_without_errors_connected_and_offline(qtbot, server):
         ctx.setContextProperty("memory", MemoryModel(client))
         ctx.setContextProperty("tools", ToolsModel(client))
         ctx.setContextProperty("conversations", ConversationsModel(client))
+        ctx.setContextProperty("tasksModel", TasksModel(client))
         ctx.setContextProperty("appPaths", {"icons": QUrl.fromLocalFile(str(paths.ICONS) + "/").toString(),
                                             "shaders": QUrl.fromLocalFile(str(paths.SHADERS) + "/").toString(),
                                             "web": QUrl.fromLocalFile(str(paths.WEB) + "/").toString()})
@@ -480,3 +481,54 @@ def test_conversations_model_lists_and_opens_sessions(qtbot, tmp_path):
         client.stop()
     finally:
         srv.stop()
+
+
+# ---- the tasks model --------------------------------------------------------------------------------------------------------------------
+def test_tasks_model_shows_and_changes_through_vex_tools(qtbot, tmp_path):
+    ran = []
+    c, *_ = make()
+    executor = SimpleNamespace(listeners=[], undo=None,
+                               run=lambda name, args: ran.append((name, args)) or SimpleNamespace(ok=True, message=f"did {name}"))
+    core = ApiCore(controller=c, executor=executor, logs=tmp_path, data=tmp_path)
+    core.commands["tasks.list"] = lambda a: [{"number": 1, "text": "Buy fish food", "due": "2020-01-01", "done": False},
+                                             {"number": 2, "text": "Old thing", "due": None, "done": True},
+                                             {"number": 3, "text": "Renew gym", "due": None, "done": False}]
+    core.commands["reminders.list"] = lambda a: [{"number": 1, "text": "Call mom", "due": "2030-01-01T19:00:00",
+                                                  "repeat": "every day at 19:00"}]
+    srv = ApiServer(core, TOKEN, port=0)
+    assert srv.start()
+    try:
+        client = connect(qtbot, srv.bound_port)
+        m = TasksModel(client)
+        toasts = []
+        m.toast.connect(toasts.append)
+        qtbot.waitUntil(lambda: bool(m.tasks) and bool(m.reminders), timeout=8000)
+        assert [t["text"] for t in m.tasks] == ["Buy fish food", "Renew gym", "Old thing"]      # done ones last
+        assert m.tasks[0]["overdue"] and not m.tasks[2]["overdue"] and m.openCount == 2
+        assert m.reminders[0]["when"].endswith("19:00") and m.reminders[0]["repeat"] == "every day at 19:00"
+        m.addTask("Water plants", "tomorrow")
+        m.completeTask(1)
+        m.deleteTask(3)
+        m.addReminder("stretch", "in 20 minutes")
+        m.cancelReminder(1)
+        qtbot.waitUntil(lambda: len(ran) == 5, timeout=5000)
+        assert sorted(ran, key=str) == sorted([("add_task", {"text": "Water plants", "due": "tomorrow"}), ("complete_task", {"task": "1"}),
+                                               ("delete_task", {"task": "3"}), ("set_reminder", {"text": "stretch", "when": "in 20 minutes"}),
+                                               ("cancel_reminder", {"which": "1"})], key=str)
+        assert "Confirm on Vex's screen" in toasts
+        client.stop()
+    finally:
+        srv.stop()
+
+
+def test_task_api_commands_go_through_the_executor(tmp_path):
+    ran = []
+    c, *_ = make()
+    ex = SimpleNamespace(listeners=[], run=lambda name, args: ran.append((name, args)) or SimpleNamespace(ok=True, message="ok"))
+    core = ApiCore(controller=c, executor=ex, logs=tmp_path, data=tmp_path)
+    assert core.tasks_add({"text": "  buy   milk ", "due": ""})["ok"] and ran[-1] == ("add_task", {"text": "buy milk", "due": ""})
+    import pytest as _pytest
+
+    from ui.api_core import ApiError
+    with _pytest.raises(ApiError):
+        core.reminders_add({"text": "x", "when": ""})

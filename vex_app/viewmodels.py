@@ -767,3 +767,100 @@ class ConversationsModel(QObject):
     sessions = Property("QVariantList", lambda self: self._sessions, notify=changed)
     selected = Property(str, lambda self: self._selected, notify=changed)
     detail = Property("QVariantMap", lambda self: self._detail, notify=detailChanged)
+
+
+class TasksModel(QObject):
+    """Tasks & reminders: your to-do list (VexVault/tasks.md) and the reminders Vex will speak. Every change goes through Vex's own
+    tools, so it is audited and asks first where it would by voice (deleting a task, cancelling all reminders)."""
+
+    changed = Signal()
+    toast = Signal(str)
+
+    def __init__(self, client: ApiClient, parent=None):
+        super().__init__(parent)
+        self.client = client
+        self._tasks: list = []
+        self._reminders: list = []
+        client.connectedChanged.connect(lambda: client.connected and self.refresh())
+        client.event.connect(lambda name, data: name == "activity" and isinstance(data, dict)
+                             and str(data.get("tool", "")).endswith(("task", "reminder")) and self.refresh())
+
+    @Slot()
+    def refresh(self) -> None:
+        if not self.client.connected:
+            return
+        self.client.call("tasks.list", {}, self._got_tasks)
+        self.client.call("reminders.list", {}, self._got_reminders)
+
+    def _got_tasks(self, ok: bool, data, err: str) -> None:
+        if not ok:
+            return
+        rows = [{"number": t["number"], "text": t.get("text", ""), "due": self._due_text(t.get("due")), "done": bool(t.get("done")),
+                 "overdue": self._overdue(t.get("due")) and not t.get("done")} for t in data or []]
+        rows.sort(key=lambda r: (r["done"], r["number"]))
+        self._tasks = rows
+        self.changed.emit()
+
+    def _got_reminders(self, ok: bool, data, err: str) -> None:
+        if not ok:
+            return
+        self._reminders = [{"number": r["number"], "text": r.get("text", ""), "when": self._due_text(r.get("due"), True),
+                            "repeat": r.get("repeat") or ""} for r in data or []]
+        self.changed.emit()
+
+    @staticmethod
+    def _due_text(due, with_time: bool = False) -> str:
+        if not due:
+            return ""
+        try:
+            dt = datetime.fromisoformat(str(due))
+        except ValueError:
+            return str(due)
+        today = datetime.now(dt.tzinfo).date() if dt.tzinfo else datetime.now().date()
+        has_time = with_time or len(str(due)) > 10
+        day = "Today" if dt.date() == today else ("Tomorrow" if (dt.date() - today).days == 1 else dt.strftime("%a %d %b"))
+        return day + (dt.strftime(" %H:%M") if has_time else "")
+
+    @staticmethod
+    def _overdue(due) -> bool:
+        if not due:
+            return False
+        try:
+            dt = datetime.fromisoformat(str(due))
+        except ValueError:
+            return False
+        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+        return dt < now if len(str(due)) > 10 else dt.date() < now.date()
+
+    def _done(self, ok, d, e) -> None:
+        msg = (d or {}).get("message") if ok else e
+        if msg:
+            self.toast.emit(msg.split("\n")[0][:160])
+        self.refresh()
+
+    @Slot(str, str)
+    def addTask(self, text: str, due: str) -> None:
+        if text.strip():
+            self.client.call("tasks.add", {"text": text, "due": due}, self._done)
+
+    @Slot(int)
+    def completeTask(self, number: int) -> None:
+        self.client.call("tasks.complete", {"number": number}, self._done)
+
+    @Slot(int)
+    def deleteTask(self, number: int) -> None:
+        self.toast.emit("Confirm on Vex's screen")
+        self.client.call("tasks.delete", {"number": number}, self._done)
+
+    @Slot(str, str)
+    def addReminder(self, text: str, when: str) -> None:
+        if text.strip() and when.strip():
+            self.client.call("reminders.add", {"text": text, "when": when}, self._done)
+
+    @Slot(int)
+    def cancelReminder(self, number: int) -> None:
+        self.client.call("reminders.cancel", {"number": number}, self._done)
+
+    tasks = Property("QVariantList", lambda self: self._tasks, notify=changed)
+    reminders = Property("QVariantList", lambda self: self._reminders, notify=changed)
+    openCount = Property(int, lambda self: sum(1 for t in self._tasks if not t["done"]), notify=changed)
