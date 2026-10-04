@@ -23,6 +23,12 @@ to the middle of the screen; after `orb_autosleep` idle seconds it shrinks back 
 wake it by hand: the orb sends `{"event": "wake_clicked"}` to the click port and Vex starts listening. `orb_mode = "overlay"` gives the
 older floating orb (click it to talk). Clicking an already-awake dock orb does nothing; use the hotkey or wake word.
 
+## How the window works
+One small (560x350) transparent window follows the shape, so Windows never sees a fullscreen app and only a small area is composited.
+It is click-through (`WS_EX_TRANSPARENT`) except while the cursor is over the pill/orb; a window mask is not used because it would clip
+the glow and the caption. `python -m vex_ui.app --debug` prints fps and ms per frame every 2 s (measured here: about 60 fps, 9-13 ms at
+200% scaling on Intel Iris Xe). Errors and crashes go to `vex_ui/vex_ui.log`.
+
 ## Configure (`[ui]` in config.toml)
 | Key | Meaning |
 |---|---|

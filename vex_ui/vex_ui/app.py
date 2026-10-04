@@ -61,6 +61,7 @@ def parse_args(argv=None):
     ap.add_argument("--click-port", type=int, default=0,
                     help="overlay: send {\"click\": true} to udp://127.0.0.1:<port> when the orb is clicked (not dragged); 0 = off")
     ap.add_argument("--fps", type=int, default=60)
+    ap.add_argument("--debug", action="store_true", help="print fps and ms per frame every 2 seconds")
     return ap.parse_args(argv)
 
 
@@ -367,7 +368,24 @@ class VexWindow(QWidget):
         super().resizeEvent(e)
 
 
+def _setup_logging() -> None:
+    """Errors (including crashes) go to vex_ui.log next to the vex_ui folder: pythonw has no console to show them."""
+    import logging
+    from pathlib import Path
+
+    try:
+        h = logging.FileHandler(Path(__file__).resolve().parent.parent / "vex_ui.log", encoding="utf-8")
+        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        lg = logging.getLogger("vex_ui")
+        lg.setLevel(logging.INFO)
+        lg.addHandler(h)
+        sys.excepthook = lambda t, v, tb: lg.error("uncaught exception", exc_info=(t, v, tb))
+    except OSError:
+        pass
+
+
 def main(argv=None):
+    _setup_logging()
     args = parse_args(argv)
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv[:1])

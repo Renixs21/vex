@@ -11,3 +11,4 @@ VexVault/
 .pytest_cache/
 *.onnx
 *.tmp
+vex_ui/vex_ui.log

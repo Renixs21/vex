@@ -3,24 +3,32 @@ Vex dock window: the orb lives as a thin pill on a screen edge (like Samsung's E
 "Hey Vex" -> it peels off, swells into the orb and glides to the middle of the screen.
 "Sleep"   -> it shrinks and slides back to the edge.
 
-One transparent, click-through, always-on-top window covers the screen. Only the pill / orb
-itself receives the mouse (via a window mask); everything else clicks straight through.
+One small (560x350) transparent, always-on-top window that moves with the shape. Only the pill / orb
+itself receives the mouse (via a window mask); everything else clicks straight through. The window never
+covers the screen, so Windows never treats it as a fullscreen app and only a small area is composited.
 Used by `python -m vex_ui.app` (the default mode).
 """
 from __future__ import annotations
 
+import ctypes
 import json
+import logging
 import socket
+import sys
 import time
 
 import moderngl
-from PySide6.QtCore import QRect, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QImage, QPainter, QPen, QRegion
+from PySide6.QtCore import QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QImage, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
 
 from vex_ui.app import ControlServer, Mic, orb_icon
 from vex_ui.dock import DockConfig, DockRenderer
 from vex_ui.renderer import PALETTES, STATES
+
+
+log = logging.getLogger("vex_ui")
+VIEW = (560, 350)                    # logical size of the window that follows the shape
 
 
 class DockWindow(QWidget):
@@ -38,10 +46,11 @@ class DockWindow(QWidget):
 
         screens = QGuiApplication.screens()
         screen = screens[args.screen] if 0 <= args.screen < len(screens) else QGuiApplication.primaryScreen()
-        # one pixel short of the full height: Windows hides the taskbar for borderless windows that
-        # cover a whole monitor, and this keeps it from treating Vex as a fullscreen app
-        self.setGeometry(screen.geometry().adjusted(0, 0, 0, -1))
+        sg = screen.geometry()
+        self.sx, self.sy = sg.x(), sg.y()                  # this monitor's top-left on the virtual desktop
         self.dpr = float(screen.devicePixelRatio())
+        self.setGeometry(sg.x() + sg.width() - VIEW[0], sg.y() + int(sg.height() * args.edge_y) - 112, *VIEW)
+        self._frames, self._frame_ms, self._dbg_t = 0, 0.0, time.perf_counter()
 
         try:
             self.ctx = moderngl.create_standalone_context()
@@ -49,7 +58,7 @@ class DockWindow(QWidget):
             self.ctx = moderngl.create_standalone_context(backend="egl")
         cfg = DockConfig(edge=args.edge, edge_y=args.edge_y, center_y=args.center_y,
                          orb_radius=args.orb_radius, speed=args.speed)
-        self.r = DockRenderer(self.ctx, (self.width(), self.height()), self.dpr, cfg)
+        self.r = DockRenderer(self.ctx, (sg.width(), sg.height()), self.dpr, cfg, view_size=VIEW)
         self.r.set_palette(args.palette)
 
         self.server = ControlServer(args.port)
@@ -58,7 +67,7 @@ class DockWindow(QWidget):
         self.mic = Mic() if args.mic else None
         self._img = None
         self._img_rect = QRectF()
-        self._mask_key = None
+        self._solid = True                                 # becomes click-through on the first frame
         self.start = self.last = time.perf_counter()
         self.last_active = self.start
 
@@ -159,23 +168,30 @@ class DockWindow(QWidget):
             r.set_state("sleep")
 
         r.update(t, dt)
+        ox, oy = r.view_origin()                           # the window follows the shape
+        r.ox, r.oy = ox, oy
+        if (self.x() - self.sx, self.y() - self.sy) != (ox, oy):
+            self.move(self.sx + ox, self.sy + oy)
         data, (x, y, w, h) = r.render()
         d = self.dpr
-        img = QImage(data, w, h, w * 4, QImage.Format_RGBA8888_Premultiplied).mirrored(False, True)
-        rect = QRectF(x / d, y / d, w / d, h / d)
-        ca = r.caption_alpha()
-        if ca > 0.003:
-            self._draw_caption(img, rect, ca)
-        self._img, self._img_rect = img, rect
-        self.update(rect.toAlignedRect())
-        self._update_mask()
+        self._data = data                                    # GL rows are bottom-first; paintEvent flips them (no copy)
+        self._img = QImage(self._data, w, h, w * 4, QImage.Format_RGBA8888_Premultiplied)
+        self.update()
+        self._update_click_through()
+        if self.args.debug:
+            self._frames += 1
+            self._frame_ms += (time.perf_counter() - now) * 1000
+            if now - self._dbg_t >= 2.0:
+                fps = self._frames / (now - self._dbg_t)
+                msg = f"fps {fps:.1f}  {self._frame_ms / self._frames:.1f} ms/frame  dpr {d}"
+                print("[vex-ui]", msg, flush=True)
+                log.info(msg)
+                self._frames, self._frame_ms, self._dbg_t = 0, 0.0, now
 
-    def _draw_caption(self, img: QImage, rect: QRectF, alpha: float):
+    def _draw_caption(self, p: QPainter, alpha: float):
         cx, cy, w, h = self.r.caption_rect()
-        p = QPainter(img)
+        cx, cy = cx - self.r.ox, cy - self.r.oy             # screen -> window coordinates
         p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
-        p.scale(img.width() / rect.width(), img.height() / rect.height())
-        p.translate(-rect.x(), -rect.y())
         font = QFont("Segoe UI", 15)
         font.setWeight(QFont.DemiBold)
         p.setFont(font)
@@ -188,16 +204,37 @@ class DockWindow(QWidget):
             p.drawText(box.translated(dx, dy), int(flags), self.r.s.caption)
         p.setPen(QColor(246, 248, 255))
         p.drawText(box, int(flags), self.r.s.caption)
-        p.end()
+        p.setOpacity(1.0)
 
-    def _update_mask(self):
+    def _update_click_through(self):
+        """Clicks pass through the window everywhere except on the pill / orb.
+
+        A window mask would also clip the glow and the caption, so instead the window is made click-through
+        (WS_EX_TRANSPARENT) unless the cursor is over the shape; checked every frame."""
         (x, y, w, h), is_ball = self.r.hit_rect()
-        key = (round(x), round(y), round(w), round(h), is_ball)
-        if key == self._mask_key:
+        p = QCursor.pos()
+        lx, ly = p.x() - self.sx - x, p.y() - self.sy - y        # hit_rect is in screen coordinates
+        inside = 0 <= lx <= w and 0 <= ly <= h
+        if inside and is_ball:                              # the ball is round
+            nx, ny = lx / (w / 2) - 1, ly / (h / 2) - 1
+            inside = nx * nx + ny * ny <= 1
+        if inside != self._solid:
+            self._solid = inside
+            self._set_transparent(not inside)
+
+    def _set_transparent(self, on: bool):
+        if sys.platform != "win32":
             return
-        self._mask_key = key
-        rect = QRect(key[0], key[1], key[2], key[3])
-        self.setMask(QRegion(rect, QRegion.Ellipse) if is_ball else QRegion(rect))
+        try:
+            GWL_EXSTYLE, WS_EX_TRANSPARENT = -20, 0x20
+            hwnd = int(self.winId())
+            u32 = ctypes.windll.user32
+            u32.GetWindowLongW.restype = ctypes.c_long
+            style = u32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            style = style | WS_EX_TRANSPARENT if on else style & ~WS_EX_TRANSPARENT
+            u32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+        except Exception:                                   # noqa: BLE001 - never break the animation over this
+            log.exception("could not change click-through")
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -205,8 +242,14 @@ class DockWindow(QWidget):
         p.fillRect(e.rect(), Qt.transparent)
         if self._img is not None:
             p.setCompositionMode(QPainter.CompositionMode_SourceOver)
-            p.setClipRect(e.rect())
-            p.drawImage(self._img_rect, self._img)
+            p.save()
+            p.translate(0, VIEW[1])
+            p.scale(VIEW[0] / self._img.width(), -VIEW[1] / self._img.height())    # flip: GL rows are bottom-first
+            p.drawImage(0, 0, self._img)
+            p.restore()
+            ca = self.r.caption_alpha()
+            if ca > 0.003:
+                self._draw_caption(p, ca)
         p.end()
 
     # ------------------------------------------------------------ input

@@ -122,11 +122,15 @@ class DockState:
 
 class DockRenderer:
     def __init__(self, ctx: moderngl.Context, win_size: tuple[int, int], dpr: float = 1.0,
-                 cfg: DockConfig | None = None):
+                 cfg: DockConfig | None = None, view_size: tuple[int, int] | None = None):
+        """win_size: the screen (logical px), used for geometry. view_size: the small window that follows the shape
+        and is all that gets drawn (default: the whole screen, as before)."""
         self.ctx, self.dpr = ctx, float(dpr)
         self.cfg = cfg or DockConfig()
         self.W, self.H = win_size                       # logical
-        self.pw, self.ph = int(round(self.W * dpr)), int(round(self.H * dpr))
+        self.vw, self.vh = view_size or win_size        # logical size of the drawn window
+        self.ox = self.oy = 0.0                         # top-left of that window on the screen (logical)
+        self.pw, self.ph = int(round(self.vw * dpr)), int(round(self.vh * dpr))
         self.prog = ctx.program(
             vertex_shader="#version 330\nin vec2 p;void main(){gl_Position=vec4(p,0,1);}",
             fragment_shader=FRAG)
@@ -256,6 +260,12 @@ class DockRenderer:
             s.text_rise += (0.0 - s.text_rise) * min(1.0, dt * 4.0)
         self._compute_geometry()
 
+    def view_origin(self) -> tuple[int, int]:
+        """Where the follow-the-shape window should sit on the screen (logical px, whole numbers): the shape stays near its
+        top, leaving room below for the caption."""
+        cx, cy, _, _ = self.geo
+        return int(round(cx - self.vw / 2)), int(round(cy - self.vh * 0.32))
+
     def _box(self):
         """Logical bounding box that must be redrawn this frame (shape + glow [+ caption])."""
         cx, cy, hx, hy = self.geo
@@ -267,17 +277,12 @@ class DockRenderer:
         return [x0, y0, x1, y1]
 
     def render(self):
-        """Draw the frame. Returns (rgba_bytes_bottom_row_first, (x, y, w, h) in physical px, top-left origin)."""
-        box = self._box()
-        if self._prev_box:                                  # also wipe where the shape was last frame
-            p = self._prev_box
-            box = [min(box[0], p[0]), min(box[1], p[1]), max(box[2], p[2]), max(box[3], p[3])]
-        self._prev_box = self._box()
+        """Draw the whole (small) window. Returns (rgba_bytes_bottom_row_first, (0, 0, w, h) in physical px).
+
+        The window is cleared and redrawn every frame, so nothing from an earlier frame can linger."""
         d = self.dpr
-        x0 = max(0, int(math.floor(box[0] * d))); y0 = max(0, int(math.floor(box[1] * d)))
-        x1 = min(self.pw, int(math.ceil(box[2] * d))); y1 = min(self.ph, int(math.ceil(box[3] * d)))
-        w, h = max(1, x1 - x0), max(1, y1 - y0)
-        gl_y = self.ph - y1
+        x0, y0, w, h = 0, 0, self.pw, self.ph
+        gl_y = 0
 
         s, p = self.s, self.prog
         cx, cy, hx, hy = self.geo
@@ -291,14 +296,12 @@ class DockRenderer:
         p["u_glow"].value = s.look["glow"] + 0.5 * pulse + 0.15 * hov
         p["u_distort"].value = s.look["dist"]
         p["u_morph"].value = self.morph
-        p["u_pos"].value = (cx * d, (self.H - cy) * d)
+        p["u_pos"].value = ((cx - self.ox) * d, (self.vh - (cy - self.oy)) * d)
         p["u_half"].value = (hx * d, hy * d)
         p["u_dark"].value, p["u_mid"].value, p["u_light"].value = dk, md, lt
 
         self.fbo.use()
-        self.fbo.scissor = (x0, gl_y, w, h)
-        self.fbo.clear(0.0, 0.0, 0.0, 0.0, viewport=(x0, gl_y, w, h))
+        self.fbo.viewport = (0, 0, w, h)
+        self.fbo.clear(0.0, 0.0, 0.0, 0.0)
         self.vao.render(moderngl.TRIANGLE_STRIP)
-        data = self.fbo.read(viewport=(x0, gl_y, w, h), components=4)
-        self.fbo.scissor = None
-        return data, (x0, y0, w, h)
+        return self.fbo.read(components=4), (0, 0, w, h)
