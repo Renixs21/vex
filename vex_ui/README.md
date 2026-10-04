@@ -4,16 +4,16 @@ A native desktop app (Python + Qt + a GPU shader, no browser/HTML): a small marb
 slow, milky liquid swirls and a soft light from the lower left (in the style of the assistant-ui Orb).
 Colours: `blue` (default), `default` (grey), `violet`, `emerald`.
 
-## Two modes
+## Modes
 | Mode | What you get | Launch |
 |---|---|---|
-| **Overlay** (default) | The orb floats over your desktop, bottom-centre above the taskbar, with a faint glow. No box, always on top, no taskbar button. Empty space is click-through. | `run_vex_ui.bat` |
-| **Window** | Widescreen 16:9 window, dark background. Double-click or F11 for fullscreen. | `run_vex_window.bat` |
+| **Dock** (default) | Vex lives as a thin pill on the right screen edge (like Samsung's Edge Panel handle). "Hey Vex": it peels off, swells into the orb and glides to the middle of the screen. Sleep: it shrinks back into the edge. Click the pill to wake it by hand. | `run_vex_ui.bat` |
+| **Overlay** | The orb floats at the bottom-centre of the desktop, transparent and click-through, and fades out when asleep. | `python -m vex_ui.app --mode overlay` |
+| **Window** | Widescreen 16:9 window, dark background. F11 / double-click for fullscreen. | `run_vex_window.bat` |
 
-## States
-`wake` (pops in) · `idle` (dim, slow swirl) · `listening` (brighter, glow, pulses with mic) ·
-`thinking` (faster, swirling flow) · `speaking` (brightest; swells, ripples and glows with the voice) ·
-`sleep` (fades away completely until the next wake)
+Dock options: `--edge right|left`, `--edge-y 0.40` (pill height, fraction from the top),
+`--center-y 0.50` (where the orb lands), `--orb-radius 62`, `--speed 1.0` (about a 1 s move;
+0.7 slower, 1.3 faster), `--screen 0`, `--start-awake`.
 
 ## Install
 ```
@@ -40,9 +40,15 @@ ui.thinking("Thinking…")
 ui.speak_file("reply.mp3", caption=reply_text)   # plays the gTTS audio + animates, then idle
 ui.sleep()                                       # or let --autosleep do it
 ```
+Events back from the UI (when the user wakes Vex by clicking the pill or tray icon):
+```python
+from vex_ui.client import listen_events
+listen_events(lambda e: start_listening() if e["event"] == "wake_clicked" else None)   # udp 47475
+```
 Raw protocol: JSON to `udp://127.0.0.1:47474`, e.g. `{"state":"speaking","caption":"…","level":0.6}`,
 `{"palette":"violet"}`, `{"wake":true}`, `{"quit":true}`.
 
 To start it with Windows, put a shortcut to `run_vex_ui.bat` (with `--start-asleep`) in `shell:startup`.
 
-`python preview.py` / `python preview.py --window` re-render the preview videos (needs ffmpeg).
+`python preview_dock.py` records the real dock window code over a mock desktop (needs ffmpeg).
+`python preview.py` / `python preview.py --window` render the older overlay/window previews.

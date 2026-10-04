@@ -17,11 +17,19 @@ VexController --set_state / set_level / show_caption / show / hide--> MultiFront
   `{"click": true}` to Vex.) Dragging still moves it; right-click gives the orb's own menu.
 - Vex only closes an orb it started itself. If you launch `vex_ui` by hand first, Vex just uses it.
 
+## Dock mode (default)
+Vex lives as a thin pill on the right screen edge. A wake word, hotkey or state change makes it peel off, swell into the orb and glide
+to the middle of the screen; after `orb_autosleep` idle seconds it shrinks back into the edge. **Click the pill** (or the tray icon) to
+wake it by hand: the orb sends `{"event": "wake_clicked"}` to the click port and Vex starts listening. `orb_mode = "overlay"` gives the
+older floating orb (click it to talk). Clicking an already-awake dock orb does nothing; use the hotkey or wake word.
+
 ## Configure (`[ui]` in config.toml)
 | Key | Meaning |
 |---|---|
 | `visual = "orb"` | `orb`, `pill` (the small built-in Qt widget) or `both` |
-| `orb_position` | bottom, bottom-right, bottom-left, center, top-right |
+| `orb_mode` | `dock` (default) or `overlay` |
+| `orb_edge`, `orb_edge_y`, `orb_center_y`, `orb_radius` | dock: edge (right/left), pill height, landing height, orb size |
+| `orb_position` (overlay only) | bottom, bottom-right, bottom-left, center, top-right |
 | `orb_palette` | blue, default (grey), violet, emerald |
 | `orb_size` | e.g. `"420x340"`; blank = default |
 | `orb_autosleep` | seconds idle before it fades away (0 = stays) |

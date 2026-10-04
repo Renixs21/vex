@@ -98,6 +98,28 @@ class VexUI:
             self.idle(then_idle or None)
 
 
+def listen_events(callback, port: int = 47475):
+    """
+    Get events back from the dock UI (runs in a background thread).
+    Currently: {"event": "wake_clicked"} when the user wakes Vex by clicking the pill or tray icon,
+    so the backend can start listening just like after "Hey Vex".
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("127.0.0.1", port))
+
+    def loop():
+        while True:
+            data, _ = sock.recvfrom(65536)
+            try:
+                callback(json.loads(data.decode("utf-8")))
+            except Exception:
+                pass
+
+    th = threading.Thread(target=loop, daemon=True)
+    th.start()
+    return th
+
+
 if __name__ == "__main__":
     # quick demo while the window is running:  python -m vex_ui.client
     ui = VexUI()

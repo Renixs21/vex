@@ -36,7 +36,8 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     "ui": {
         "hotkey": "ctrl+alt+v", "caption_seconds": 8,
         "visual": "orb",                 # orb (the marbled orb app), pill (small built-in Qt widget) or both
-        "orb_dir": "vex_ui", "orb_position": "bottom", "orb_palette": "blue", "orb_size": "", "orb_autosleep": 0,
+        "orb_dir": "vex_ui", "orb_position": "bottom", "orb_palette": "blue", "orb_size": "", "orb_autosleep": 20,
+        "orb_mode": "dock", "orb_edge": "right", "orb_edge_y": 0.40, "orb_center_y": 0.50, "orb_radius": 62.0,
         "orb_port": 47474, "orb_click_port": 47475,
     },
     "wakeword": {"enabled": True, "model_path": "models/hey_vex.onnx", "fallback_model": "hey_jarvis", "threshold": 0.5,

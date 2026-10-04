@@ -197,7 +197,7 @@ def orb_folder(tmp_path, with_app=True):
 
 
 def test_command_line_has_the_configured_options(tmp_path):
-    p = OrbProcess(orb_folder(tmp_path), port=1234, click_port=1235, position="bottom-right", palette="violet", size="420x340",
+    p = OrbProcess(orb_folder(tmp_path), port=1234, click_port=1235, mode="overlay", position="bottom-right", palette="violet", size="420x340",
                    autosleep=20)
     cmd = p.command()
     assert cmd[1:4] == ["-m", "vex_ui.app", "--mode"] and cmd[0].lower().endswith(("pythonw.exe", "python.exe"))
@@ -205,6 +205,13 @@ def test_command_line_has_the_configured_options(tmp_path):
     for part in ("--position bottom-right", "--palette violet", "--port 1234", "--click-port 1235", "--size 420x340", "--autosleep 20"):
         assert part in joined
     assert "--size" not in OrbProcess(orb_folder(tmp_path)).command() and "--autosleep" not in OrbProcess(tmp_path).command()
+
+
+def test_dock_mode_is_the_default_and_uses_the_notify_port(tmp_path):
+    cmd = " ".join(OrbProcess(orb_folder(tmp_path), port=1234, click_port=1235, edge="left", edge_y=0.3, autosleep=20).command())
+    for part in ("--mode dock", "--port 1234", "--notify-port 1235", "--edge left", "--edge-y 0.3", "--autosleep 20"):
+        assert part in cmd
+    assert "--click-port" not in cmd and "--position" not in cmd
 
 
 def test_an_orb_that_is_already_running_is_left_alone(tmp_path):
@@ -290,6 +297,21 @@ def test_a_click_from_the_orb_starts_listening():
         cl.stop()
 
 
+def test_a_click_on_the_dock_pill_starts_listening():
+    got = []
+    cl = ClickListener(0, got.append)
+    cl.start()
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.sendto(b'{"event": "wake_clicked"}', ("127.0.0.1", cl.port))
+        deadline = time.time() + 2
+        while not got and time.time() < deadline:
+            time.sleep(0.02)
+        assert got == ["orb-click"]
+    finally:
+        cl.stop()
+
+
 def test_only_real_click_messages_count_and_a_failing_handler_does_not_kill_the_listener():
     calls = []
 
@@ -337,7 +359,7 @@ def fake_orb(monkeypatch):
 
 
 def ui_cfg(**kw):
-    base = {"visual": "orb", "orb_dir": "vex_ui", "orb_position": "bottom", "orb_palette": "blue", "orb_size": "", "orb_autosleep": 0,
+    base = {"visual": "orb", "orb_dir": "vex_ui", "orb_position": "bottom", "orb_palette": "blue", "orb_size": "", "orb_autosleep": 0, "orb_mode": "dock", "orb_edge": "right", "orb_edge_y": 0.4, "orb_center_y": 0.5, "orb_radius": 62.0,
             "orb_port": 47474, "orb_click_port": 47475}
     return {**base, **kw}
 

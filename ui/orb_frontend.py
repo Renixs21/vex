@@ -5,7 +5,7 @@ missing orb can never stall Vex: sends are fire-and-forget and errors are swallo
 
   OrbFrontend   implements ui.frontend.VisualFrontend: state, level (30 Hz), caption, show (wake) / hide (sleep)
   OrbProcess    starts the orb app (`pythonw -m vex_ui.app`) if it isn't already running, and closes it again on quit
-  ClickListener the orb can't call back, so it sends {"click": true} to a second UDP port when you click it; this turns that
+  ClickListener the orb sends {"click": true} (overlay) or {"event": "wake_clicked"} (dock pill) to a second UDP port; this turns that
                 into controller.start_listening("click")
   MultiFrontend fans every call out to several frontends (for example the orb and the small Qt pill together)
 """
@@ -131,15 +131,20 @@ def _port_in_use(port: int) -> bool:
 class OrbProcess:
     """Starts the orb app from the vex_ui folder. If something already listens on its port it is left alone (and not stopped later)."""
 
-    def __init__(self, folder: Path, port: int = ORB_PORT, click_port: int = CLICK_PORT, mode: str = "overlay",
+    def __init__(self, folder: Path, port: int = ORB_PORT, click_port: int = CLICK_PORT, mode: str = "dock",
                  position: str = "bottom", palette: str = "blue", size: str = "", autosleep: float = 0.0,
+                 edge: str = "right", edge_y: float = 0.40, center_y: float = 0.50, orb_radius: float = 62.0,
                  python: str | None = None, popen: Callable = subprocess.Popen,
                  port_in_use: Callable[[int], bool] = _port_in_use):
         self.folder = Path(folder)
         self.port, self.click_port = port, click_port
-        self.args = ["--mode", mode, "--position", position, "--palette", palette, "--port", str(port),
-                     "--click-port", str(click_port)]
-        if size:
+        self.args = ["--mode", mode, "--palette", palette, "--port", str(port)]
+        if mode == "dock":              # the pill on the screen edge; clicking it reports {"event": "wake_clicked"}
+            self.args += ["--notify-port", str(click_port), "--edge", edge, "--edge-y", str(edge_y),
+                          "--center-y", str(center_y), "--orb-radius", str(orb_radius)]
+        else:
+            self.args += ["--position", position, "--click-port", str(click_port)]
+        if size and mode != "dock":
             self.args += ["--size", size]
         if autosleep:
             self.args += ["--autosleep", str(autosleep)]
@@ -235,7 +240,7 @@ class ClickListener:
             except (UnicodeDecodeError, json.JSONDecodeError):
                 log.info("click port %d: datagram from %s:%d %r -> ignored (not JSON)", self.port, addr[0], addr[1], raw)
                 continue
-            if isinstance(msg, dict) and msg.get("click") is True:
+            if isinstance(msg, dict) and (msg.get("click") is True or msg.get("event") == "wake_clicked"):   # overlay / dock
                 log.info("click port %d: datagram from %s:%d %r -> orb click, starting a listening turn", self.port, addr[0], addr[1], raw)
                 try:
                     self.on_click("orb-click")

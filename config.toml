@@ -27,10 +27,15 @@ hotkey = "ctrl+alt+v"                # global hotkey (Win32 RegisterHotKey): sta
 caption_seconds = 8                  # how long the pill keeps showing the last caption once idle
 visual = "orb"                       # orb = the marbled orb app in vex_ui/ ; pill = small built-in widget ; both
 orb_dir = "vex_ui"
-orb_position = "bottom"              # bottom, bottom-right, bottom-left, center, top-right
+orb_mode = "dock"                    # dock (pill on a screen edge <-> orb in the middle) or overlay (orb floats at orb_position)
+orb_edge = "right"                   # dock: right or left
+orb_edge_y = 0.40                    # dock: pill height, fraction from the top
+orb_center_y = 0.50                  # dock: where the orb lands, fraction from the top
+orb_radius = 62                      # dock: orb size in px
+orb_position = "bottom"              # overlay: bottom, bottom-right, bottom-left, center, top-right
 orb_palette = "blue"                 # blue, default (grey), violet, emerald
 orb_size = ""                        # e.g. "420x340"; blank = the orb's default
-orb_autosleep = 0                    # seconds idle before the orb fades away (0 = stays)
+orb_autosleep = 20                   # seconds idle before the orb returns to the edge / fades away (0 = stays)
 orb_port = 47474                     # Vex -> orb (UDP, localhost)
 orb_click_port = 47475               # orb -> Vex: clicking the orb starts listening
 

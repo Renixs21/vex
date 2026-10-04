@@ -30,7 +30,8 @@ def build_visual(ui_cfg: dict, pill, on_click, notify):
         return pill, None, None
     orb = OrbProcess(ROOT / ui_cfg["orb_dir"], port=ui_cfg["orb_port"], click_port=ui_cfg["orb_click_port"],
                      position=ui_cfg["orb_position"], palette=ui_cfg["orb_palette"], size=ui_cfg["orb_size"],
-                     autosleep=ui_cfg["orb_autosleep"])
+                     autosleep=ui_cfg["orb_autosleep"], mode=ui_cfg["orb_mode"], edge=ui_cfg["orb_edge"],
+                     edge_y=ui_cfg["orb_edge_y"], center_y=ui_cfg["orb_center_y"], orb_radius=ui_cfg["orb_radius"])
     if not orb.start():
         notify("Vex", "The orb couldn't start, so I'm using the small pill instead. See docs/ORB.md.")
         return pill, None, None

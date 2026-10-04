@@ -1,7 +1,8 @@
 """
 Vex visual — desktop app for Windows (also runs on macOS/Linux).
 
-    python -m vex_ui.app                      # overlay: orb floats on the desktop, bottom-centre
+    python -m vex_ui.app                      # dock (default): pill on the right edge <-> orb in the middle
+    python -m vex_ui.app --mode overlay       # orb floats on the desktop, bottom-centre
     python -m vex_ui.app --mode window        # widescreen window, dark background
     python -m vex_ui.app --palette violet     # blue (default) | default (grey) | violet | emerald
     python -m vex_ui.app --mode window --fullscreen
@@ -36,7 +37,8 @@ PORT = 47474
 
 def parse_args(argv=None):
     ap = argparse.ArgumentParser(description="Vex orb visual")
-    ap.add_argument("--mode", choices=["overlay", "window"], default="overlay")
+    ap.add_argument("--mode", choices=["dock", "overlay", "window"], default="dock",
+                    help="dock: pill on a screen edge <-> orb in the middle (default)")
     ap.add_argument("--size", default=None, help="logical size, e.g. 560x440 (overlay) or 1280x720 (window)")
     ap.add_argument("--position", default="bottom",
                     choices=["bottom", "bottom-right", "bottom-left", "center", "top-right"],
@@ -44,11 +46,20 @@ def parse_args(argv=None):
     ap.add_argument("--fullscreen", action="store_true", help="window mode: start fullscreen")
     ap.add_argument("--autosleep", type=float, default=0, help="seconds idle before fading away (0 = never)")
     ap.add_argument("--palette", choices=list(PALETTES), default="blue", help="orb colour")
+    # dock mode
+    ap.add_argument("--edge", choices=["right", "left"], default="right", help="dock: which screen edge")
+    ap.add_argument("--edge-y", type=float, default=0.40, help="dock: pill height, fraction from the top")
+    ap.add_argument("--center-y", type=float, default=0.50, help="dock: where the orb lands, fraction from the top")
+    ap.add_argument("--orb-radius", type=float, default=62.0, help="dock: orb radius in logical px")
+    ap.add_argument("--speed", type=float, default=1.0, help="dock: animation speed (1.0 = about 1 s; 0.7 slower, 1.3 faster)")
+    ap.add_argument("--screen", type=int, default=0, help="dock: which monitor (0 = primary)")
+    ap.add_argument("--start-awake", action="store_true", help="dock: start as the orb instead of the pill")
+    ap.add_argument("--notify-port", type=int, default=47475, help="dock: UDP port for events back to Vex")
     ap.add_argument("--mic", action="store_true", help="orb reacts to your microphone while listening")
     ap.add_argument("--start-asleep", action="store_true", help="start hidden; appear on wake()")
     ap.add_argument("--port", type=int, default=PORT)
     ap.add_argument("--click-port", type=int, default=0,
-                    help="send {\"click\": true} to udp://127.0.0.1:<port> when the orb is clicked (not dragged); 0 = off")
+                    help="overlay: send {\"click\": true} to udp://127.0.0.1:<port> when the orb is clicked (not dragged); 0 = off")
     ap.add_argument("--fps", type=int, default=60)
     return ap.parse_args(argv)
 
@@ -362,6 +373,11 @@ def main(argv=None):
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(True)
     app.setApplicationName("Vex")
+    if args.mode == "dock":
+        from vex_ui.dock_app import DockWindow
+        w = DockWindow(args)
+        w.show()
+        sys.exit(app.exec())
     w = VexWindow(args)
     if args.mode == "window" and args.fullscreen:
         w.showFullScreen()
