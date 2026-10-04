@@ -16,7 +16,7 @@ window says so, offers **Start Vex** (starts the supervisor quietly), and reconn
 | Screen | Status |
 |---|---|
 | Home | built |
-| Memory | next |
+| Memory | built |
 | Tools & permissions | next |
 | Conversations, Tasks & reminders, Voice, System & health, Budget | after that |
 
@@ -32,6 +32,22 @@ window says so, offers **Start Vex** (starts the supervisor quietly), and reconn
 * **Tiles:** response time (median "you stopped talking -> first word", first audio, turns counted), health (the last check; **Run check**
   runs the free one, about 5 s), budget (rupees used of 1000, with a bar).
 * **A confirmation in progress** shows as a banner: "Vex is asking: ... | Confirm on Vex's screen". There is no approve button.
+
+### Memory
+Tabs **Focus | Galaxy | Timeline | Notes** and a search box (results drop down; Enter or click opens the note).
+* **Focus** (default, opens on your best-connected note): a sigma.js graph in a QtWebEngine panel (all scripts bundled in
+  `vex_app/web/vendor/`, MIT; no CDN). The selected note sits in the middle, its neighbours on a ring, theirs on an outer ring. Colour by
+  type: Projects `#93a8bf`, People `#cdb98a`, Preferences `#c8896a`, everything else (facts) `#b9bec6`; size by importance. Edges are
+  faint `#3a3e45`; 2nd-hop edges are dashed and fainter. Hovering a node lights only its edges; clicking re-centres on it. Legend bottom
+  left, zoom +/- bottom right.
+* **Galaxy:** every note (daily logs included: they hold many links), laid out with ForceAtlas2; small labels appear as you zoom in.
+* **Timeline:** what Vex learned, grouped by day, with the note and the source of each fact.
+* **Notes:** a card per note (type, title, facts, last change), filtered by the search box.
+* **Right panel:** the selected note: type pill, title, text, its `[[links]]` as chips (click to go there), "What Vex knows" (each fact
+  with when it was learned and where from), "Mentioned in", and **Open** (in your editor) / **Edit** (in the app; secrets and a changed id
+  line are refused, like Vex's own viewer) / **Forget...** (shows exactly what Vex would remove, asks, then moves the note to the Recycle
+  Bin). Below: the **Inbox** (facts Vex wasn't sure about) with Keep / Discard.
+* The sidebar card shows the vault size against its 200 MB soft cap while you're on Memory.
 
 ## Look
 Base `#0b0c0e`. Panels: brushed gunmetal (`shaders/panel.frag`: gradient `#1b1d21`->`#141619`, very faint vertical brush lines, 1px

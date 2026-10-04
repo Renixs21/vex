@@ -14,7 +14,7 @@ pytest.importorskip("pytestqt")
 from ui.api_core import ApiCore                                     # noqa: E402 - the test side may use Vex; the app may not
 from ui.api_server import ApiServer                                  # noqa: E402
 from vex_app.client import ApiClient                                 # noqa: E402
-from vex_app.viewmodels import HomeModel, StatusModel                # noqa: E402
+from vex_app.viewmodels import HomeModel, MemoryModel, StatusModel   # noqa: E402
 
 TOKEN = "z" * 43
 APP_DIR = Path(__file__).resolve().parent.parent / "vex_app"
@@ -210,10 +210,12 @@ def test_the_qml_loads_without_errors_connected_and_offline(qtbot, server):
         ctx = engine.rootContext()
         ctx.setContextProperty("vex", status)
         ctx.setContextProperty("home", home)
+        ctx.setContextProperty("memory", MemoryModel(client))
         ctx.setContextProperty("appPaths", {"icons": QUrl.fromLocalFile(str(paths.ICONS) + "/").toString(),
                                             "shaders": QUrl.fromLocalFile(str(paths.SHADERS) + "/").toString(),
                                             "web": QUrl.fromLocalFile(str(paths.WEB) + "/").toString()})
         ctx.setContextProperty("startScreen", "home")
+        ctx.setContextProperty("startTab", 0)
         engine.load(QUrl.fromLocalFile(str(paths.QML / "Main.qml")))
         assert engine.rootObjects(), warnings
         client.start()
@@ -271,3 +273,90 @@ def test_tray_and_pill_can_open_the_control_center(monkeypatch):
         assert opened.wait(3) and clicks == []                             # opened, and not treated as a listen click
     finally:
         cl.stop()
+
+
+# ---- the memory model --------------------------------------------------------------------------------------------------------------------
+@pytest.fixture
+def mem_server(tmp_path, mem):
+    c, *_ = make()
+    mem.remember("Roommate since 2024", about="Rahul", note_type="person")
+    mem.remember("Rahul is helping with the [[Portfolio Site]]", about="Rahul")
+    mem.remember("Portfolio site built with Next.js and [[Tailwind]]", about="Portfolio Site", note_type="project")
+    mem.add_to_inbox("Likes jazz (proposed for me, preference, confidence 0.70; personal)", source="curator")
+    hk = SimpleNamespace(vault_bytes=lambda: 1_800_000.0, vault_cap_mb=200.0, vault_percent=lambda: 0.9, vault_full=lambda: False)
+    core = ApiCore(controller=c, memory_factory=lambda: mem, housekeeper=hk, logs=tmp_path, data=tmp_path)
+    core.attach()
+    srv = ApiServer(core, TOKEN, port=0)
+    assert srv.start()
+    yield SimpleNamespace(server=srv, mem=mem)
+    srv.stop()
+
+
+def test_memory_model_starts_on_the_best_connected_note_and_loads_everything(qtbot, mem_server):
+    client = connect(qtbot, mem_server.server.bound_port)
+    m = MemoryModel(client)
+    qtbot.waitUntil(lambda: bool(m.note.get("id")) and bool(m.focusGraph), timeout=8000)
+    assert m.note["title"] in ("Rahul", "Portfolio Site")                  # the linked ones, not a lonely note
+    assert {n["hop"] for n in m.focusGraph["nodes"]} >= {0, 1}
+    assert m.size["text"] == "1.8 MB of 200 MB" and len(m.inbox) == 1 and "confidence 0.70" in m.inbox[0]["detail"]
+    titles = {n["title"]: n for n in m.notes}
+    assert titles["Rahul"]["typeLabel"] == "Person" and titles["Rahul"]["color"] == "#cdb98a"
+    assert titles["Portfolio Site"]["color"] == "#93a8bf"
+    m.loadGalaxy()
+    qtbot.waitUntil(lambda: bool(m.galaxy.get("nodes")), timeout=5000)
+    m.loadTimeline()
+    qtbot.waitUntil(lambda: bool(m.timeline), timeout=5000)
+    assert m.timeline[0]["items"] and m.timeline[0]["label"]
+    m.search("roommate")
+    qtbot.waitUntil(lambda: bool(m.results), timeout=5000)
+    assert m.results[0]["title"] == "Rahul"
+    client.stop()
+
+
+def test_memory_model_selects_keeps_and_forgets_only_after_confirming(qtbot, mem_server):
+    client = connect(qtbot, mem_server.server.bound_port)
+    m = MemoryModel(client)
+    qtbot.waitUntil(lambda: bool(m.notes), timeout=8000)
+    rahul = next(n["id"] for n in m.notes if n["title"] == "Rahul")
+    m.select(rahul)
+    qtbot.waitUntil(lambda: m.note.get("id") == rahul, timeout=5000)
+    assert any(f["text"] == "Rahul is helping with the Portfolio Site" for f in m.note["facts"])    # [[links]] shown as plain names
+    assert any(l["title"] == "Portfolio Site" for l in m.note["links"])
+    previews = []
+    m.forgetPreview.connect(previews.append)
+    m.askForget()
+    qtbot.waitUntil(lambda: bool(previews), timeout=5000)
+    assert "Rahul" in previews[0]
+    assert any(n["title"] == "Rahul" for n in mem_server.mem.index.list_notes())               # the preview changed nothing
+    m.confirmForget()
+    qtbot.waitUntil(lambda: not any(n["title"] == "Rahul" for n in m.notes), timeout=5000)
+    m.keep(0)
+    qtbot.waitUntil(lambda: m.inbox == [], timeout=5000)
+    client.stop()
+
+
+def test_memory_model_edits_through_the_api_and_refuses_secrets(qtbot, mem_server):
+    client = connect(qtbot, mem_server.server.bound_port)
+    m = MemoryModel(client)
+    toasts, raws = [], []
+    m.toast.connect(toasts.append)
+    m.rawLoaded.connect(raws.append)
+    qtbot.waitUntil(lambda: bool(m.note.get("id")), timeout=8000)
+    m.editNote()
+    qtbot.waitUntil(lambda: bool(raws), timeout=5000)
+    m.saveNote(raws[0] + "\n- my api key is sk-abcdefghijklmnopqrstuvwx123456\n")
+    qtbot.waitUntil(lambda: bool(toasts), timeout=5000)
+    assert "secret" in toasts[-1].lower()
+    client.stop()
+
+
+def test_body_and_link_cleanup():
+    assert MemoryModel._unlink("See [[Aquarium]] and [[Rahul|my roommate]].") == "See Aquarium and my roommate."
+    assert MemoryModel._plain_body("Facts about me.\n<!-- src: user -->\n- a fact ^b1\n## Notes") == "Facts about me."
+
+
+def test_graph_page_is_local_only():
+    html = (APP_DIR / "web" / "graph.html").read_text(encoding="utf-8")
+    assert "http://" not in html and "https://" not in html                   # no CDN: everything from vendor/
+    for f in ("sigma.min.js", "graphology.umd.min.js", "graphology-library.min.js"):
+        assert f"vendor/{f}" in html and (APP_DIR / "web" / "vendor" / f).exists()

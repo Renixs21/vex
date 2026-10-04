@@ -292,3 +292,243 @@ def start_vex_process(command: list[str]) -> None:
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
     except OSError:
         log.exception("could not start Vex")
+
+
+TYPE_LABELS = {"project": "Project", "person": "Person", "preference": "Preference", "profile": "Profile", "topic": "Topic",
+               "place": "Place", "daily": "Daily log", "task-list": "Tasks", "ghost": "Not written yet"}
+TYPE_COLORS = {"project": "#93a8bf", "person": "#cdb98a", "preference": "#c8896a"}
+FACT_COLOR = "#b9bec6"
+
+
+class MemoryModel(QObject):
+    """The Memory screen: Focus (a note + 2 hops), Galaxy (everything), Timeline, Notes, the selected note and the inbox."""
+
+    changed = Signal()
+    focusGraphChanged = Signal()
+    galaxyChanged = Signal()
+    noteChanged = Signal()
+    toast = Signal(str)
+    forgetPreview = Signal(str)                # the app shows this in its own "are you sure?" dialog
+    rawLoaded = Signal(str)                    # the editor opens with this text
+
+    def __init__(self, client: ApiClient, parent=None):
+        super().__init__(parent)
+        self.client = client
+        self._focusId = ""
+        self._focusGraph: dict = {}
+        self._galaxy: dict = {}
+        self._timeline: list = []
+        self._notes: list = []
+        self._note: dict = {}
+        self._inbox: list = []
+        self._size: dict = {}
+        self._results: list = []
+        client.connectedChanged.connect(lambda: client.connected and self.refresh())
+
+    # ---- loading ------------------------------------------------------------------------------------------------------------------
+    @Slot()
+    def refresh(self) -> None:
+        if not self.client.connected:
+            return
+        self.client.call("memory.list", {}, self._got_notes)
+        self.client.call("memory.inbox", {}, lambda ok, d, e: ok and self._set("_inbox", [self._inbox_view(i) for i in d or []]))
+        self.client.call("memory.size", {}, lambda ok, d, e: ok and self._set("_size", d or {}))
+
+    def _set(self, attr: str, value) -> None:
+        setattr(self, attr, value)
+        self.changed.emit()
+
+    def _got_notes(self, ok: bool, data, err: str) -> None:
+        if not ok:
+            return
+        self._notes = [{**n, "typeLabel": TYPE_LABELS.get(n["type"], n["type"].capitalize()), "color": self.color(n["type"]),
+                        "updatedText": str(n.get("updated", ""))[:10]} for n in data or []]
+        self.changed.emit()
+        if not self._focusId and self._notes:                       # start on the best-connected note, so Focus shows a neighbourhood
+            self.client.call("memory.graph", {"daily": True}, self._pick_start)
+
+    def _pick_start(self, ok: bool, data, err: str) -> None:
+        if self._focusId or not self._notes:
+            return
+        links = {n["id"]: n.get("links", 0) for n in ((data or {}).get("nodes") or []) if not n.get("ghost")} if ok else {}
+        best = max(self._notes, key=lambda n: (links.get(n["id"], 0), n["type"] != "daily", n["type"] == "profile"))
+        self.select(best["id"])
+
+    @staticmethod
+    def color(type_: str) -> str:
+        return TYPE_COLORS.get(type_, FACT_COLOR)
+
+    @staticmethod
+    def _inbox_view(i: dict) -> dict:
+        bits = [str(i.get("note") or ""), str(i.get("type") or "")]
+        if i.get("confidence") is not None:
+            bits.append(f"confidence {float(i['confidence']):.2f}")
+        return {**i, "text": i.get("fact") or i.get("text") or "", "detail": " · ".join(b for b in bits if b)}
+
+    @Slot(str)
+    def select(self, note_id: str) -> None:
+        if not note_id or note_id.startswith("ghost:"):
+            return
+        self._focusId = note_id
+        self.client.call("memory.neighbours", {"id": note_id, "hops": 2}, self._got_focus)
+        self.client.call("memory.note", {"id": note_id}, self._got_note)
+
+    def _got_focus(self, ok: bool, data, err: str) -> None:
+        if ok:
+            self._focusGraph = data or {}
+            self.focusGraphChanged.emit()
+
+    def _got_note(self, ok: bool, data, err: str) -> None:
+        if not ok:
+            self.toast.emit(err or "Couldn't open that note")
+            return
+        n = data or {}
+        facts = [{"text": self._unlink(f.get("text", "")), "learned": str(f.get("learned") or "")[:10], "source": f.get("source") or ""}
+                 for f in n.get("facts", [])]
+        t = n.get("type", "")
+        self._note = {"id": n.get("id"), "title": n.get("title", ""), "type": t, "path": n.get("path", ""),
+                      "typeLabel": TYPE_LABELS.get(t, str(t).capitalize()), "color": self.color(t),
+                      "body": self._plain_body(n.get("body", "")), "facts": facts,
+                      "links": [{"id": x["id"], "title": x["title"]} for x in n.get("links_out", [])],
+                      "backlinks": [{"id": b["id"], "title": b["title"]} for b in n.get("backlinks", [])][:12],
+                      "created": str(n.get("created") or "")[:10], "updated": str(n.get("updated") or "")[:10]}
+        self.noteChanged.emit()
+
+    @staticmethod
+    def _unlink(text: str) -> str:
+        """[[Aquarium]] -> Aquarium, [[Rahul|my roommate]] -> my roommate (the links are shown as chips)."""
+        import re
+
+        return re.sub(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]", lambda m: m.group(2) or m.group(1), text or "")
+
+    @staticmethod
+    def _plain_body(body: str) -> str:
+        """The note's free text without the fact lines (shown separately), headings and block ids."""
+        import re
+
+        body = re.sub(r"<!--.*?-->", "", body or "", flags=re.S)        # the vault's own metadata comments
+        lines = [x for x in body.splitlines() if not re.match(r"^\s*-\s", x) and not x.startswith("#")]
+        text = "\n".join(x.rstrip() for x in lines).strip()
+        return re.sub(r"\s*\^[\w-]+$", "", text, flags=re.M)
+
+    @Slot()
+    def loadGalaxy(self) -> None:
+        def done(ok, d, e):
+            if ok:
+                self._galaxy = d or {}
+                self.galaxyChanged.emit()
+
+        self.client.call("memory.graph", {"daily": True}, done)          # the full graph: daily logs hold many of the links
+
+    @Slot()
+    def loadTimeline(self) -> None:
+        self.client.call("memory.timeline", {"limit": 300}, self._got_timeline)
+
+    def _got_timeline(self, ok: bool, data, err: str) -> None:
+        if not ok:
+            return
+        days = []
+        for d in data or []:
+            try:
+                label = datetime.fromisoformat(d["day"]).strftime("%a %d %b %Y")
+            except ValueError:
+                label = d["day"]
+            days.append({"day": d["day"], "label": label,
+                         "items": [{**i, "color": self.color(i.get("type", "")), "typeLabel": TYPE_LABELS.get(i.get("type", ""), "")}
+                                   for i in d.get("items", [])]})
+        self._set("_timeline", days)
+
+    @Slot(str)
+    def search(self, query: str) -> None:
+        q = (query or "").strip()
+        if not q:
+            self._set("_results", [])
+            return
+        self.client.call("memory.search", {"query": q, "limit": 12},
+                         lambda ok, d, e: ok and self._set("_results", [{**r, "color": self.color(r.get("type", ""))} for r in d or []]))
+
+    # ---- actions -------------------------------------------------------------------------------------------------------------------
+    @Slot()
+    def openNote(self) -> None:
+        if self._note.get("id"):
+            self.client.call("memory.open", {"id": self._note["id"]}, lambda ok, d, e: (not ok) and self.toast.emit(e))
+
+    @Slot()
+    def editNote(self) -> None:
+        if self._note.get("id"):
+            self.client.call("memory.raw", {"id": self._note["id"]},
+                             lambda ok, d, e: ok and self.rawLoaded.emit((d or {}).get("text", "")))
+
+    @Slot(str)
+    def saveNote(self, text: str) -> None:
+        nid = self._note.get("id")
+        if not nid:
+            return
+
+        def done(ok, d, e):
+            self.toast.emit("Saved." if ok else (e or "Not saved"))
+            if ok:
+                self.select(nid)
+                self.refresh()
+
+        self.client.call("memory.save", {"id": nid, "text": text}, done)
+
+    @Slot()
+    def askForget(self) -> None:
+        """Step 1: ask Vex what forgetting this note would do; the app shows it and asks you."""
+        if self._note.get("id"):
+            self.client.call("memory.forget", {"id": self._note["id"]},
+                             lambda ok, d, e: self.forgetPreview.emit((d or {}).get("message", "") if ok else (e or "")))
+
+    @Slot()
+    def confirmForget(self) -> None:
+        """Step 2, only after you said yes in the dialog: the note goes to the Recycle Bin."""
+        nid = self._note.get("id")
+        if not nid:
+            return
+
+        def done(ok, d, e):
+            self.toast.emit((d or {}).get("message", "Done.") if ok else (e or "Not forgotten"))
+            self._note, self._focusId = {}, ""
+            self.noteChanged.emit()
+            self.refresh()
+
+        self.client.call("memory.forget", {"id": nid, "confirm": True}, done)
+
+    @Slot(int)
+    def keep(self, index: int) -> None:
+        self._inbox_action("memory.keep", index)
+
+    @Slot(int)
+    def discard(self, index: int) -> None:
+        self._inbox_action("memory.discard", index)
+
+    def _inbox_action(self, cmd: str, index: int) -> None:
+        if not 0 <= index < len(self._inbox):
+            return
+        item = self._inbox[index]
+
+        def done(ok, d, e):
+            self.toast.emit(("Kept." if cmd.endswith("keep") else "Discarded.") if ok else (e or "That didn't work"))
+            self.refresh()
+
+        self.client.call(cmd, {"path": item.get("path"), "block": item.get("block")}, done)
+
+    # ---- properties ----------------------------------------------------------------------------------------------------------------
+    focusId = Property(str, lambda self: self._focusId, notify=focusGraphChanged)
+    focusGraph = Property("QVariantMap", lambda self: self._focusGraph, notify=focusGraphChanged)
+    galaxy = Property("QVariantMap", lambda self: self._galaxy, notify=galaxyChanged)
+    timeline = Property("QVariantList", lambda self: self._timeline, notify=changed)
+    notes = Property("QVariantList", lambda self: self._notes, notify=changed)
+    note = Property("QVariantMap", lambda self: self._note, notify=noteChanged)
+    inbox = Property("QVariantList", lambda self: self._inbox, notify=changed)
+    results = Property("QVariantList", lambda self: self._results, notify=changed)
+
+    def _size_view(self) -> dict:
+        s = self._size or {}
+        if not s:
+            return {"mb": 0, "cap": 200, "fraction": 0.0, "text": ""}
+        return {"mb": s.get("mb", 0), "cap": s.get("cap_mb", 200), "fraction": min(1.0, float(s.get("percent", 0) or 0) / 100),
+                "text": f"{float(s.get('mb', 0)):.1f} MB of {float(s.get('cap_mb', 200)):.0f} MB"}
+
+    size = Property("QVariantMap", _size_view, notify=changed)

@@ -126,3 +126,14 @@ def _no_real_local_api(monkeypatch):
     import config
 
     monkeypatch.setitem(config.settings.setdefault("api", {}), "enabled", False)
+
+
+@pytest.fixture(autouse=True)
+def _never_the_real_recycle_bin(monkeypatch, tmp_path_factory):
+    """Forgetting a note in a test moves it to a temp folder, never to the real Recycle Bin (tests can still patch it themselves)."""
+    import shutil
+
+    from memory import forget as forget_mod
+
+    bin_dir = tmp_path_factory.mktemp("recycle_bin")
+    monkeypatch.setattr(forget_mod, "send2trash", lambda p: shutil.move(str(p), str(bin_dir)))

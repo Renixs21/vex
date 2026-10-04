@@ -23,8 +23,10 @@ Window {
         anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
         compact: win.compact
         current: win.current
-        bottomTitle: vex.connected ? "Vex is running" : "Vex isn't running"
-        bottomDetail: vex.connected ? "uptime " + vex.uptime : "retrying…"
+        readonly property bool onMemory: win.current === "memory" && vex.connected
+        bottomTitle: onMemory ? "Vault" : (vex.connected ? "Vex is running" : "Vex isn't running")
+        bottomDetail: onMemory ? memory.size.text : (vex.connected ? "uptime " + vex.uptime : "retrying…")
+        bottomFraction: onMemory ? memory.size.fraction : -1
         onNavigate: (screen) => win.current = screen
     }
     Rectangle { anchors { left: sidebar.right; top: parent.top; bottom: parent.bottom } width: 1; color: "#15171a" }
@@ -38,7 +40,7 @@ Window {
             anchors.fill: parent
             focus: true
             active: vex.connected
-            sourceComponent: win.current === "home" ? homeComp : placeholderComp
+            sourceComponent: win.current === "home" ? homeComp : win.current === "memory" ? memoryComp : placeholderComp
             opacity: 0
             onLoaded: { opacity = 0; slide.restart() }
             transform: Translate { id: shift; x: 0 }
@@ -52,6 +54,7 @@ Window {
     }
 
     Component { id: homeComp; Home { onNavigate: (screen) => win.current = screen } }
+    Component { id: memoryComp; Memory {} }
     Component { id: placeholderComp; Placeholder { title: win.titles[win.current] || "" } }
 
     // a short message at the bottom (e.g. "Starting Vex...")

@@ -70,7 +70,9 @@ class ApiCore:
             "activity": self.get_activity, "audit": self.audit, "undo.peek": self.undo_peek, "undo": self.undo,
             "memory.search": self.memory_search, "memory.note": self.memory_note, "memory.neighbours": self.memory_neighbours,
             "memory.inbox": self.memory_inbox, "memory.keep": self.memory_keep, "memory.discard": self.memory_discard,
-            "memory.size": self.memory_size,
+            "memory.size": self.memory_size, "memory.graph": self.memory_graph, "memory.list": self.memory_list,
+            "memory.timeline": self.memory_timeline, "memory.raw": self.memory_raw, "memory.save": self.memory_save,
+            "memory.open": self.memory_open, "memory.forget": self.memory_forget,
             "tools.list": self.tools_list, "tools.enable": self.tools_enable, "tools.disable": self.tools_disable,
             "health": self.health, "latency": self.latency, "autostart.get": self.autostart_get, "autostart.set": self.autostart_set,
             "budget": self.budget, "commands": lambda a: sorted(self.commands),
@@ -293,6 +295,87 @@ class ApiCore:
         r = self._viewer().discard(path, block)
         self._add_activity("memory", action="discard", block=block)
         return r
+
+    def memory_graph(self, args: dict) -> dict:
+        """Every note and link (the Galaxy view): nodes (id, title, type, importance, links) and edges."""
+        return self._viewer().graph(show_daily=bool(args.get("daily", False)))
+
+    def memory_list(self, args: dict) -> list[dict]:
+        """The notes, newest change first (the Notes cards): id, title, type, importance, updated, facts count."""
+        v = self._viewer()
+        v.index.sync()
+        with v.index.lock:
+            counts = dict(v.index.db.execute("SELECT note_id, COUNT(*) FROM blocks GROUP BY note_id").fetchall())
+        rows = [r for r in v.index.list_notes(args.get("type") or None) if r["type"] != "inbox"]
+        out = [{"id": r["id"], "title": r["title"], "type": r["type"], "importance": r["importance"], "updated": r["updated"] or "",
+                "facts": int(counts.get(r["id"], 0))} for r in rows]
+        out.sort(key=lambda n: n["updated"], reverse=True)
+        return out
+
+    def memory_timeline(self, args: dict) -> list[dict]:
+        """What Vex learned, newest day first: [{day, items: [{note_id, title, type, text, source, learned}]}]."""
+        from memory import parser
+
+        v = self._viewer()
+        v.index.sync()
+        limit = max(1, min(1000, int(args.get("limit", 300))))
+        with v.index.lock:
+            rows = v.index.db.execute(
+                "SELECT b.note_id, b.text, b.learned, b.source, n.title, n.type FROM blocks b JOIN notes n ON n.id=b.note_id "
+                "WHERE b.learned IS NOT NULL AND b.learned != '' AND n.type != 'inbox' ORDER BY b.learned DESC LIMIT ?", (limit,)).fetchall()
+        days: dict[str, list] = {}
+        for note_id, text, learned, source, title, type_ in rows:
+            days.setdefault(str(learned)[:10], []).append({"note_id": note_id, "title": title, "type": type_, "learned": learned,
+                                                            "source": source or "", "text": parser.strip_links(text or "")[:300]})
+        return [{"day": d, "items": items} for d, items in days.items()]
+
+    def _note_id(self, v, args: dict) -> str:
+        nid = str(args.get("id", "")) or (v.resolve(str(args.get("name", ""))) or "")
+        if not nid or v.index.note(nid) is None:
+            raise ApiError("no such note")
+        return nid
+
+    def memory_raw(self, args: dict) -> dict:
+        v = self._viewer()
+        nid = self._note_id(v, args)
+        return {"id": nid, "text": v.raw(nid) or ""}
+
+    def memory_save(self, args: dict) -> dict:
+        """Save an edited note (the whole markdown file). Refuses secrets and a changed id line, like Vex's own viewer."""
+        v = self._viewer()
+        nid = self._note_id(v, args)
+        text = args.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise ApiError("text is empty")
+        r = v.save(nid, text)
+        if not r.get("ok"):
+            raise ApiError(r.get("error") or "not saved")
+        self._add_activity("memory", action="edit", note=nid)
+        return r
+
+    def memory_open(self, args: dict) -> dict:
+        """Open the note's markdown file in the default editor on this PC."""
+        import os
+
+        v = self._viewer()
+        nid = self._note_id(v, args)
+        path = v.index.path_of(nid)
+        try:
+            os.startfile(path)  # noqa: S606
+        except OSError as e:
+            raise ApiError(f"couldn't open it: {e}") from e
+        return {"opened": str(path)}
+
+    def memory_forget(self, args: dict) -> dict:
+        """Forget a whole note. Without confirm: the preview only (what would go). With confirm=true: the note goes to the Recycle Bin,
+        facts mainly about it are deleted and other facts lose the name (exactly Vex's own "forget")."""
+        v = self._viewer()
+        nid = self._note_id(v, args)
+        title = v.index.note(nid)["title"]
+        r = self.memory_factory().forget(title, confirm=bool(args.get("confirm", False)))
+        if args.get("confirm"):
+            self._add_activity("memory", action="forget", note=title)
+        return {"ok": r.ok, "message": r.message, "confirmed": bool(args.get("confirm", False))}
 
     def memory_size(self, args: dict) -> dict:
         hk = self.housekeeper

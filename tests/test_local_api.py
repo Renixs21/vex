@@ -436,3 +436,35 @@ def test_api_core_errors_are_api_errors(world):
         world.core.memory_search({"query": ""})
     with pytest.raises(ApiError):
         world.core.autostart_set({})
+
+
+def test_memory_graph_list_timeline_raw_save_forget(world, monkeypatch):
+    m = world.mem
+    m.remember("Roommate since 2024", about="Rahul", note_type="person")
+    m.remember("Rahul is helping with the [[Portfolio Site]]", about="Rahul")
+    m.remember("Portfolio site built with Next.js", about="Portfolio Site", note_type="project")
+    g = call(world, "memory.graph")["data"]
+    titles = {n["title"] for n in g["nodes"]}
+    assert {"Rahul", "Portfolio Site"} <= titles and g["edges"]
+    notes = call(world, "memory.list")["data"]
+    rahul = next(n for n in notes if n["title"] == "Rahul")
+    assert rahul["type"] == "person" and rahul["facts"] == 2
+    tl = call(world, "memory.timeline")["data"]
+    assert tl and any(i["title"] == "Rahul" and "Roommate" in i["text"] for d in tl for i in d["items"])
+    raw = call(world, "memory.raw", {"id": rahul["id"]})["data"]["text"]
+    assert "Roommate since 2024" in raw
+    assert call(world, "memory.save", {"id": rahul["id"], "text": raw + "\n- My password is hunter2hunter2\n"})["ok"] is False
+    assert call(world, "memory.save", {"id": rahul["id"], "text": raw.replace("Roommate since 2024", "Roommate since 2023")})["ok"]
+    assert "2023" in call(world, "memory.raw", {"id": rahul["id"]})["data"]["text"]
+    opened = []
+    monkeypatch.setattr("os.startfile", opened.append, raising=False)
+    assert call(world, "memory.open", {"id": rahul["id"]})["ok"] and opened and str(opened[0]).endswith(".md")
+    prev = call(world, "memory.forget", {"id": rahul["id"]})["data"]
+    assert prev["confirmed"] is False and "Rahul" in prev["message"]
+    assert any(n["title"] == "Rahul" for n in call(world, "memory.list")["data"])          # a preview changes nothing
+    trashed = []
+    monkeypatch.setattr("memory.forget.send2trash", lambda p: trashed.append(p) or __import__("os").remove(p))
+    done = call(world, "memory.forget", {"id": rahul["id"], "confirm": True})["data"]
+    assert done["confirmed"] and done["ok"], done
+    assert not any(n["title"] == "Rahul" for n in call(world, "memory.list")["data"])
+    assert len(trashed) == 1 and trashed[0].endswith(".md")                 # went to the (fake) Recycle Bin

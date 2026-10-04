@@ -25,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--size", default="", help="WxH, e.g. 1280x800")
     ap.add_argument("--screenshot", default="", help="dev: save a PNG of the window after it has loaded, then quit")
     ap.add_argument("--wait", type=float, default=4.0, help="dev: seconds to wait for live data before the screenshot")
+    ap.add_argument("--tab", type=int, default=0, help="dev: which tab a tabbed screen opens on (Memory: 0 Focus, 1 Galaxy, 2 Timeline, 3 Notes)")
     ap.add_argument("--port", type=int, default=0, help="dev: a different API port (default: config.toml [api] port)")
     return ap
 
@@ -41,8 +42,13 @@ def main(argv: list[str] | None = None) -> int:
     from vex_app import paths
     from vex_app.client import ApiClient
     from vex_app.single import SingleInstance, ask_running_to_focus
-    from vex_app.viewmodels import HomeModel, StatusModel, start_vex_process
+    from vex_app.viewmodels import HomeModel, MemoryModel, StatusModel, start_vex_process
 
+    from PySide6.QtCore import QCoreApplication, Qt
+    from PySide6.QtWebEngineQuick import QtWebEngineQuick
+
+    QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+    QtWebEngineQuick.initialize()                                    # the Memory graph (sigma.js) runs in a web view
     app = QGuiApplication(sys.argv[:1])
     app.setApplicationName("Vex Control Center")
     app.setOrganizationName("Vex")
@@ -56,14 +62,18 @@ def main(argv: list[str] | None = None) -> int:
     client = ApiClient(args.port or paths.api_port(), paths.read_token)
     status = StatusModel(client, start_vex=lambda: start_vex_process(paths.vex_command()))
     home = HomeModel(client)
+    memory = MemoryModel(client)
+    memory.toast.connect(status.toast)
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
     ctx.setContextProperty("vex", status)
     ctx.setContextProperty("home", home)
+    ctx.setContextProperty("memory", memory)
     ctx.setContextProperty("appPaths", {"icons": QUrl.fromLocalFile(str(paths.ICONS) + "/").toString(),
                                         "shaders": QUrl.fromLocalFile(str(paths.SHADERS) + "/").toString(),
                                         "web": QUrl.fromLocalFile(str(paths.WEB) + "/").toString()})
     ctx.setContextProperty("startScreen", args.screen)
+    ctx.setContextProperty("startTab", args.tab)
     engine.load(QUrl.fromLocalFile(str(paths.QML / "Main.qml")))
     if not engine.rootObjects():
         log.error("the Control Center's QML failed to load")

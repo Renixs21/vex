@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>graph</title>
+<style>
+  @font-face { font-family: "Geist"; src: url("../fonts/Geist-Variable.ttf"); }
+  @font-face { font-family: "Geist Mono"; src: url("../fonts/GeistMono-Variable.ttf"); }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font-family: "Geist", sans-serif; }
+  #graph { position: absolute; inset: 0; }
+  #overlay { position: absolute; inset: 0; pointer-events: none; }
+  .legend { position: absolute; left: 16px; bottom: 14px; display: flex; gap: 16px; color: #a0a6af; font-size: 12px;
+            letter-spacing: 0.04em; user-select: none; }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .zoom { position: absolute; right: 14px; bottom: 12px; display: flex; gap: 8px; }
+  .zoom button { width: 44px; height: 44px; border-radius: 10px; border: 1px solid #33373e; color: #e6e9ed; font: 18px "Geist Mono";
+                 background: linear-gradient(#2a2e34, #1e2126); box-shadow: inset 0 1px 0 rgba(255,255,255,0.07); cursor: pointer; }
+  .zoom button:hover { background: linear-gradient(#30343b, #1e2126); }
+  .zoom button:focus-visible { outline: 2px solid rgba(230,233,237,0.75); outline-offset: 3px; }
+  .empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: #a0a6af; font-size: 15px; }
+</style>
+<script src="vendor/graphology.umd.min.js"></script>
+<script src="vendor/graphology-library.min.js"></script>
+<script src="vendor/sigma.min.js"></script>
+</head>
+<body>
+<div id="graph"></div>
+<canvas id="overlay"></canvas>
+<div class="empty" id="empty">No notes to show yet.</div>
+<div class="legend" id="legend">
+  <span><i style="background:#93a8bf"></i>Projects</span>
+  <span><i style="background:#cdb98a"></i>People</span>
+  <span><i style="background:#c8896a"></i>Preferences</span>
+  <span><i style="background:#b9bec6"></i>Facts</span>
+</div>
+<div class="zoom">
+  <button id="zin" aria-label="Zoom in">+</button>
+  <button id="zout" aria-label="Zoom out">&minus;</button>
+</div>
+<script src="graph.js"></script>
+</body>
+</html>
