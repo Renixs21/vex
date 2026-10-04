@@ -12,11 +12,11 @@ can't be used.
 2. **Whisper** (`voice/stt.py`): Groq `whisper-large-v3-turbo`, English by default. Set `language = ""` in `[voice]` to auto-detect
    (Hindi, Kannada, ...). Seconds of audio are counted per hour in `data/voice_usage.json`; when the allowance is used up, or Groq
    says 429, Vex tells you when it frees up and lets you type instead.
-3. **Speech** (`voice/tts.py`, `voice/speaker.py`): a ladder of three voices, tried in the order of `[voice] tts_order`: **Google Chirp 3 HD**
-   (needs a key, see below), then **edge-tts** (free, no key), then the **offline Windows voice** (no internet, no key, plainer): so Vex is
-   never silent. Sentences are synthesised while the previous one plays. Replies longer than `spoken_max_chars` (280): the first two
-   sentences are spoken, then "The rest is on screen. Say 'read the rest' to hear it." Saying **"read the rest"**, "say the rest" or
-   "read it all" speaks the remainder without asking the LLM.
+3. **Speech** (`voice/tts.py`, `voice/speaker.py`): **edge-tts** (Microsoft's neural voices: free, no key, needs internet), then the
+   **offline Windows voice** (no internet, plainer) if edge-tts is unreachable, so Vex is never silent. Google Chirp is optional and off
+   by default (see the last section). Sentences are synthesised while the previous one plays. Replies longer than `spoken_max_chars`
+   (280): the first two sentences are spoken, then "The rest is on screen. Say 'read the rest' to hear it." Saying **"read the rest"**,
+   "say the rest" or "read it all" speaks the remainder without asking the LLM.
 4. **Barge-in**: press the hotkey while Vex speaks: speech stops at once and it listens.
 
 ## Confirmations by voice
@@ -27,7 +27,22 @@ can't be used.
   rejects a voice answer to them as a second lock.
 - Turn it off with `confirm_by_voice = false`.
 
-## Google Chirp 3 HD (your original voice choice)
+## Choose the edge-tts voice
+`edge_voice` in `[voice]` (default `en-US-AriaNeural`). To hear the candidates (`edge_candidates`: three Indian-English, nine US and
+three UK voices) and pick one:
+```
+python tools_dev/tts_voices.py                       # one sentence in each, speaking its own name: "Hi, I'm Neerja. This is how I sound..."
+python tools_dev/tts_voices.py --voices Neerja Ava   # just these (a full name, or part of one)
+python tools_dev/tts_voices.py --list --locale en-IN # every voice edge-tts offers (any language prefix: en-GB, hi-IN, ...)
+python tools_dev/tts_voices.py --windows             # also the offline Windows voice
+python tools_dev/tts_voices.py --set Neerja          # save your pick in config.toml, then restart Vex
+```
+Each run needs internet and costs nothing. Add your own names to `edge_candidates` if you want to compare others.
+
+## Google Chirp (optional, off by default)
+Vex does not need Google: with the default `tts_order = ["edge", "windows"]` no Google key is read and nothing about Google appears at
+startup. Chirp 3 HD voices sound better but need a billing-enabled Google Cloud project (Google may ask for a prepayment or a card). To use them,
+get a key as below, then set `tts_order = ["google", "edge", "windows"]` in `config.toml`; the ladder below then applies.
 **Free tier:** Chirp 3 HD includes **1,000,000 characters per month free**, then about $30 per million (check Google's pricing page, it can
 change). Vex speaks at most two sentences of up to 280 characters per reply, so a month is thousands of replies. Google counts the characters
 of the text it speaks. Billing must be enabled on the project even to use the free allowance.
@@ -62,11 +77,10 @@ if a sentence would pass the limit. A new month starts from zero. This is a loca
 **Choose the voice:** `google_voice` in `[voice]` (default `en-US-Chirp3-HD-Aoede`). To hear the candidates (`google_candidates`: Aoede, Puck,
 Charon, Kore, Fenrir, Leda, Orus, Zephyr):
 ```
-python tools_dev/tts_voices.py                  # one sentence in each (about 60 characters each, counted like normal speech)
-python tools_dev/tts_voices.py --voices Kore    # just one
-python tools_dev/tts_voices.py --edge           # also the edge-tts and Windows voices
-python tools_dev/tts_voices.py --list           # every Chirp 3 HD voice Google offers
-python tools_dev/tts_voices.py --set Kore       # save your pick in config.toml, then restart Vex
+python tools_dev/tts_voices.py --google         # one sentence in each (about 60 characters each, counted like normal speech)
+python tools_dev/tts_voices.py --google --voices Kore
+python tools_dev/tts_voices.py --google --list
+python tools_dev/tts_voices.py --google --set Kore
 ```
 The configured name is checked against Google's list on first use; a wrong name falls back to edge-tts with a message listing valid voices.
 Built and tested with the network mocked (no real Google call has been made yet): your first real test is `tts_voices.py`.

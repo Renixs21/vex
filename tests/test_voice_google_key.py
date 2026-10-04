@@ -257,11 +257,17 @@ def test_build_voice_puts_the_key_in_google_and_always_ends_with_the_windows_voi
     assert stack.chain.notify is not None
 
 
-def test_default_order_is_chirp_edge_windows():
+def test_default_order_is_edge_then_windows_and_google_is_off_unless_asked_for(tmp_path, monkeypatch):
     import config
+    from voice import factory
 
-    assert config.settings["voice"]["tts_order"] == ["google", "edge", "windows"]
-    assert "Aoede" in config.settings["voice"]["google_candidates"]
+    cfg = config.settings["voice"]
+    assert cfg["tts_order"] == ["edge", "windows"] and "Aoede" in cfg["google_candidates"]
+    monkeypatch.setattr(config, "env", lambda name, default="": default)         # no Google key anywhere
+    stack = factory.build_voice(cfg, root=tmp_path)
+    assert [p.name for p in stack.chain.providers] == ["edge", "windows"]         # no Google provider, so no "not configured" line
+    assert all(p.available() for p in stack.chain.providers)
+    assert "en-IN-NeerjaNeural" in cfg["edge_candidates"] and cfg["edge_voice"] in cfg["edge_candidates"]
 
 
 # ---- the voice picker -----------------------------------------------------------------------------------------------------------
@@ -278,9 +284,9 @@ def test_voice_picker_names_and_set(monkeypatch, capsys):
     monkeypatch.setattr(config, "set_toml_value", lambda section, key, value, path=None: saved.append((section, key, value)))
     monkeypatch.setattr(config, "env", lambda name, default="": KEY if name == "GOOGLE_TTS_API_KEY" else default)
     monkeypatch.setattr(tts_voices, "build_google", lambda cfg, root, voice: google(ok_handler()))
-    assert tts_voices.main(["--set", "Puck"]) == 0
+    assert tts_voices.main(["--google", "--set", "Puck"]) == 0
     assert saved == [("voice", "google_voice", "en-US-Chirp3-HD-Puck")]
-    assert tts_voices.main(["--set", "Nonexistent"]) == 1 and len(saved) == 1                   # checked against Google's list
+    assert tts_voices.main(["--google", "--set", "Nonexistent"]) == 1 and len(saved) == 1       # checked against Google's list
     assert "not a voice Google offers" in capsys.readouterr().out
 
 
@@ -294,8 +300,80 @@ def test_voice_picker_speaks_each_candidate_and_reports_usage(monkeypatch, capsy
     monkeypatch.setattr(tts_voices, "build_google", lambda cfg, root, voice: GoogleTTS(voice, "en-US", api_key=KEY, validate_voice=False,
                                                                                        transport=httpx.MockTransport(ok_handler())))
     monkeypatch.setattr(config, "ROOT", tmp_path)
-    assert tts_voices.main(["--voices", "Kore", "Puck"]) == 0
+    assert tts_voices.main(["--google", "--voices", "Kore", "Puck"]) == 0
     out = capsys.readouterr().out
     assert len(spoken) == 2 and "Kore" in out and "Puck" in out and "characters used" in out
     assert tts_voices.main(["--usage"]) == 0
     assert "free characters used" in capsys.readouterr().out
+
+
+# ---- the edge-tts voice picker (the default) ----------------------------------------------------------------------------------------
+def load_picker(monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools_dev"))
+    import tts_voices
+
+    return tts_voices
+
+
+def test_edge_names_resolve_from_short_or_partial_input(monkeypatch):
+    tv = load_picker(monkeypatch)
+    cands = ["en-IN-NeerjaNeural", "en-US-AvaNeural", "en-US-AvaMultilingualNeural", "en-GB-SoniaNeural"]
+    assert tv.resolve_edge("Neerja", cands) == "en-IN-NeerjaNeural"
+    assert tv.resolve_edge("ava", cands) == "en-US-AvaNeural"                                    # the plain one, not Multilingual
+    assert tv.resolve_edge("en-GB-SoniaNeural", cands) == "en-GB-SoniaNeural"
+    assert tv.resolve_edge("Zira", cands) is None
+    assert tv.resolve_edge("Zira", cands, ["en-US-ZiraNeural"]) == "en-US-ZiraNeural"           # falls back to the full list
+    assert tv.short_name("en-IN-NeerjaNeural") == "Neerja" and tv.short_name("en-US-Chirp3-HD-Kore") == "Kore"
+
+
+def test_the_picker_speaks_every_candidate_without_a_key_or_any_google_code(monkeypatch, capsys):
+    tv = load_picker(monkeypatch)
+    spoken = []
+
+    class FakeEdge:
+        def __init__(self, voice):
+            self.voice = voice
+
+        def synthesize(self, text):
+            spoken.append((self.voice, text))
+            return Audio(tone(), 24000)
+
+    import voice.tts as vt
+
+    monkeypatch.setattr(vt, "EdgeTTS", FakeEdge)
+    monkeypatch.setattr(tv, "speak", lambda audio: None)
+    monkeypatch.setattr(tv, "build_google", lambda *a, **k: pytest.fail("Google must not be touched in edge mode"))
+    assert tv.main([]) == 0
+    out = capsys.readouterr().out
+    import config
+
+    cands = config.settings["voice"]["edge_candidates"]
+    assert [v for v, _ in spoken] == cands and len(cands) >= 12
+    assert "I'm Neerja" in spoken[0][1] and "ok" in out and "--set" in out
+    spoken.clear()
+    assert tv.main(["--voices", "Sonia", "ava", "nobody"]) == 0
+    assert [v for v, _ in spoken] == ["en-GB-SoniaNeural", "en-US-AvaNeural"] and "no candidate matches 'nobody'" in capsys.readouterr().out
+
+
+def test_set_saves_the_edge_voice_and_checks_unknown_names_against_the_live_list(monkeypatch, capsys):
+    tv = load_picker(monkeypatch)
+    import config
+
+    saved = []
+    monkeypatch.setattr(config, "set_toml_value", lambda section, key, value, path=None: saved.append((section, key, value)))
+    monkeypatch.setattr(tv, "edge_voices", lambda locale="en-": [{"ShortName": "en-US-ZiraNeural", "Locale": "en-US"}])
+    assert tv.main(["--set", "Neerja"]) == 0 and saved == [("voice", "edge_voice", "en-IN-NeerjaNeural")]
+    assert tv.main(["--set", "Zira"]) == 0 and saved[-1] == ("voice", "edge_voice", "en-US-ZiraNeural")      # not a candidate, but it exists
+    assert tv.main(["--set", "Nobody"]) == 1 and len(saved) == 2 and "No edge-tts voice matches" in capsys.readouterr().out
+
+
+def test_list_shows_the_voices_edge_offers(monkeypatch, capsys):
+    tv = load_picker(monkeypatch)
+    monkeypatch.setattr(tv, "edge_voices", lambda locale="en-": [
+        {"ShortName": "en-IN-NeerjaNeural", "Gender": "Female", "Locale": "en-IN", "VoiceTag": {"VoicePersonalities": ["Friendly"]}},
+        {"ShortName": "en-GB-RyanNeural", "Gender": "Male", "Locale": "en-GB"}])
+    assert tv.main(["--list"]) == 0
+    out = capsys.readouterr().out
+    assert "2 edge-tts voices" in out and "en-IN-NeerjaNeural" in out and "Friendly" in out and "en-GB-RyanNeural" in out
+    monkeypatch.setattr(tv, "edge_voices", lambda locale="en-": (_ for _ in ()).throw(OSError("offline")))
+    assert tv.main(["--list"]) == 1 and "internet needed" in capsys.readouterr().out
