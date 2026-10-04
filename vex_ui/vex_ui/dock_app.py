@@ -49,7 +49,7 @@ class DockWindow(QWidget):
         sg = screen.geometry()
         self.sx, self.sy = sg.x(), sg.y()                  # this monitor's top-left on the virtual desktop
         self.dpr = float(screen.devicePixelRatio())
-        self.setGeometry(sg.x() + sg.width() - VIEW[0], sg.y() + int(sg.height() * args.edge_y) - 112, *VIEW)
+        self.setGeometry(sg.x() + sg.width() - VIEW[0], sg.y() + int(sg.height() * args.edge_y) - 140, *VIEW)
         self._frames, self._frame_ms, self._dbg_t = 0, 0.0, time.perf_counter()
 
         try:

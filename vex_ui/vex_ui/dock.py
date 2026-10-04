@@ -25,6 +25,7 @@ out vec4 f_color;                      // premultiplied rgba
 uniform float u_px;                    // device pixel ratio
 uniform float u_flow, u_bright, u_alpha, u_glow, u_distort, u_morph;
 uniform vec2  u_pos, u_half;           // physical px, GL origin (bottom-left)
+uniform vec2  u_win;                   // window size, physical px
 uniform vec3  u_dark, u_mid, u_light;
 
 float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
@@ -42,6 +43,9 @@ void main(){
   float d=sd(p);
   float r=min(u_half.x,u_half.y);
   float g=exp(-max(d,0.)/(mix(14.,34.,u_morph)*u_px))*u_glow;
+  // the glow's tail must reach exactly 0 before the window edge, or the edge shows as a straight line
+  float bd=min(min(p.x,u_win.x-p.x),min(p.y,u_win.y-p.y));
+  g*=smoothstep(8.*u_px,64.*u_px,bd);
   vec4 col=vec4(u_mid*g,g);
   float cov=smoothstep(1.,-1.,d);
   if(cov>0.){
@@ -261,10 +265,10 @@ class DockRenderer:
         self._compute_geometry()
 
     def view_origin(self) -> tuple[int, int]:
-        """Where the follow-the-shape window should sit on the screen (logical px, whole numbers): the shape stays near its
-        top, leaving room below for the caption."""
+        """Where the follow-the-shape window should sit on the screen (logical px, whole numbers): the shape sits 40% down, leaving
+        room above for the glow tail and below for the caption."""
         cx, cy, _, _ = self.geo
-        return int(round(cx - self.vw / 2)), int(round(cy - self.vh * 0.32))
+        return int(round(cx - self.vw / 2)), int(round(cy - self.vh * 0.40))
 
     def _box(self):
         """Logical bounding box that must be redrawn this frame (shape + glow [+ caption])."""
@@ -298,6 +302,7 @@ class DockRenderer:
         p["u_morph"].value = self.morph
         p["u_pos"].value = ((cx - self.ox) * d, (self.vh - (cy - self.oy)) * d)
         p["u_half"].value = (hx * d, hy * d)
+        p["u_win"].value = (self.pw, self.ph)
         p["u_dark"].value, p["u_mid"].value, p["u_light"].value = dk, md, lt
 
         self.fbo.use()
