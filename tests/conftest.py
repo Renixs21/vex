@@ -40,3 +40,25 @@ def _never_touch_the_real_desktop():
     yield
     computer.set_backend(None)
     context.begin_turn("")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_internet_for_web_tools(monkeypatch):
+    """The web tools never reach the internet in tests: searches raise unless a test patches them, and HTTP goes to a blocker."""
+    import httpx
+
+    from tools import web
+
+    def blocked(request):
+        raise AssertionError(f"a test tried to reach the internet: {request.url}")
+
+    def no_search(q, n):
+        raise AssertionError("a test tried a real web search")
+
+    monkeypatch.setattr(web, "_transport", httpx.MockTransport(blocked))
+    monkeypatch.setattr(web, "_search", no_search)
+    monkeypatch.setattr(web, "_search_bing", no_search)
+    monkeypatch.setattr(web, "_resolve", lambda host: ["93.184.216.34"])
+    web._cache.clear()
+    yield
+    web._cache.clear()

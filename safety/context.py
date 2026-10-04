@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 # Tools whose successful results are untrusted content.
 UNTRUSTED_TOOLS = frozenset({"read_file", "list_dir", "web_search", "web_fetch", "get_clipboard", "play_youtube", "list_windows",
-                             "get_weather"})
+                             "get_weather", "quick_facts"})
 
 
 @dataclass
@@ -21,6 +21,7 @@ class TurnContext:
     user_text: str = ""
     untrusted_from: list[str] = field(default_factory=list)
     launches: list[dict] = field(default_factory=list)       # apps opened this turn: {"name": ..., "before": {window handles}}
+    seen_urls: set[str] = field(default_factory=set)         # links that web_search itself returned this turn
 
     @property
     def tainted(self) -> bool:
@@ -48,6 +49,16 @@ def mark_result(tool: str, ok: bool) -> None:
         with _lock:
             if tool not in _ctx.untrusted_from:
                 _ctx.untrusted_from.append(tool)
+
+
+def note_urls(urls: list[str]) -> None:
+    """web_search calls this: these exact links came from the search engine, so reading them is expected."""
+    with _lock:
+        _ctx.seen_urls.update(u for u in urls if u)
+
+
+def url_was_returned(url: str) -> bool:
+    return url in _ctx.seen_urls or url.rstrip("/") in {u.rstrip("/") for u in _ctx.seen_urls}
 
 
 def note_launch(name: str, windows_before: set[int]) -> None:

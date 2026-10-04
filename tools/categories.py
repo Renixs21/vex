@@ -14,7 +14,7 @@ import re
 
 from tools import registry
 
-CORE = ("open_app", "open_url", "play_youtube", "web_search", "recall", "remember", "more_tools")
+CORE = ("open_app", "open_url", "play_youtube", "web_search", "quick_facts", "recall", "remember", "more_tools")
 
 CATEGORIES: dict[str, dict] = {
     "files": {
@@ -54,6 +54,12 @@ CATEGORIES: dict[str, dict] = {
         "summary": "volume, brightness, screenshot, clipboard, system info, lock",
         "keywords": ["volume", "mute", "unmute", "louder", "quieter", "sound", "brightness", "dim", "brighter", "screenshot",
                      "screenshots", "screen shot", "clipboard", "battery", "cpu", "ram", "disk", "storage", "system", "lock"],
+    },
+    "web": {
+        "tools": ["web_fetch", "get_weather"],
+        "summary": "read a web page, weather forecast",
+        "keywords": ["weather", "forecast", "temperature", "rain", "raining", "snow", "humidity", "umbrella", "how hot", "how cold",
+                     "web page", "webpage", "article", "website", "url", "http", "https", "www", "read this page", "this link"],
     },
     "memory": {
         "tools": ["read_note", "link_notes", "list_notes", "forget", "memory_stats"],
@@ -95,7 +101,7 @@ def apply() -> None:
             t.category = "core"
 
 
-@registry.tool("more_tools", "Get more tools by category: " + ", ".join(CATEGORIES) + ".",
+@registry.tool("more_tools", "Get more tools by category (the groups are listed in your instructions).",
                {"category": {"type": "string", "enum": list(CATEGORIES), "description": "Tool group"}},
                describe=lambda a: f"Offer the {a['category']} tools")
 def more_tools(category: str) -> registry.ToolResult:

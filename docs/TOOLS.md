@@ -65,3 +65,22 @@ the normal toast with sound is used instead. In text mode (no orb, no voice) the
 **Surviving restarts:** reminders live in `data/reminders.json`. One-time reminders that came due while Vex was off are announced at the next
 start as "Reminder from earlier: ..."; a recurring one that missed an occurrence announces it once and carries on. A sweep every minute also
 catches anything a sleeping PC skipped. Cancelled and finished reminders are kept for 14 days and then dropped.
+
+## The web
+| Tool | Tier | Notes |
+|---|---|---|
+| `web_search` | green | DuckDuckGo with one quick retry, then Bing, then Tavily (only if `TAVILY_API_KEY` is in `.env`; free tier), then Wikipedia. An empty result moves to the next engine; if every engine is unreachable Vex says so instead of "no results". The same search is remembered for 5 minutes. |
+| `quick_facts` | green | Wikipedia's short summary of a topic, person or place; says so when the name is ambiguous. |
+| `get_weather` | green | Open-Meteo (free, no key): now, today and the next two days. `weather_place` in `[web]` is the default city, `units` is metric or imperial. Without a default Vex asks which city. |
+| `web_fetch` | green if you named the page or `web_search` returned it this turn, otherwise yellow with the URL shown | Reads one page as plain text (`question` pulls out the parts that answer it; up to 8,000 characters). |
+
+**What `web_fetch` refuses:** anything but http/https; addresses with a username or password or with something that looks like a secret in them; local
+and private addresses (`localhost`, `192.168.x.x`, `10.x`, `169.254.x.x`, names that resolve to them), checked again after every redirect (up to 4);
+files that aren't text (images, zips, PDFs); downloads over 2 MB are cut. The page cannot reach back: scripts, forms and navigation are dropped.
+
+**Web text is data, never instructions.** Pages, search results, Wikipedia and weather text are labelled "UNTRUSTED", sentences that read like
+orders to an AI ("ignore previous instructions", "run PowerShell...") are removed from page text and counted in the result, the model is told to
+summarise and never obey, and after any web content has come back the rest of that turn is "tainted": typing, key presses and unexpected links need
+an on-screen yes with a warning. Even a model that obeyed a page would still hit the confirmations for PowerShell, deleting, typing and so on.
+One honest limit: the address is checked just before the request, so a site that changes where its name points in between could slip a local address
+past that check; reading a page never changes anything on your PC, and the answer only comes back to the model.

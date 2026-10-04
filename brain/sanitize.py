@@ -33,7 +33,7 @@ _META = [re.compile(p, re.I) for p in (
     r"^(i'm|i\s+am)\s+(going\s+to|about\s+to)\s+(craft|produce|write|respond|give|answer|compose)\b",
 )]
 _ELLIPSIS_TAIL = re.compile(r"(?:\s*(?:…|\.{3,}))+\s*$")
-_SENTENCE_GLUE = re.compile(r"(?<=[a-z0-9)\"'”][.!?])(?=[A-Z])")
+_SENTENCE_GLUE = re.compile(r"(?<=[a-z0-9)\"'”][.!?])(?=[A-Z])|(?<=[A-Z]{2}[.!?])(?=[A-Z][a-z])")      # also "USA.He"
 _TOKEN = re.compile(r"[\w\-']+", re.U)
 
 

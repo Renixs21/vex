@@ -9,7 +9,7 @@ python-dotenv           # loads .env
 # --- Voice ---
 google-cloud-texttospeech   # Google Cloud TTS (Chirp 3 HD)
 edge-tts                    # free TTS fallback
-httpx                       # Google TTS over REST (API-key mode); also pulled in by the Groq client
+httpx                       # web tools, Google TTS over REST; also pulled in by the Groq client
 sounddevice                 # mic recording
 soundfile                   # write WAV for STT
 numpy
@@ -44,3 +44,4 @@ pytest                      # tests
 # --- Orb (vex_ui/) ---
 moderngl                    # GPU shader for the marbled orb
 pillow
+lxml                        # reads web pages for web_fetch

@@ -227,7 +227,10 @@ def test_web_search_cleans_and_caps_results(env, monkeypatch):
 
 def test_web_search_failure_is_a_message(env, monkeypatch):
     make, *_ = env
-    monkeypatch.setattr(web, "_search", lambda q, n: (_ for _ in ()).throw(RuntimeError("offline")))
+    boom = lambda q, n: (_ for _ in ()).throw(RuntimeError("offline"))  # noqa: E731
+    for name in ("_search", "_search_bing", "_search_tavily", "_search_wikipedia"):
+        monkeypatch.setattr(web, name, boom)
+    monkeypatch.setattr(web, "RETRY_DELAY", 0)
     ex, _ = make()
     assert "Search failed" in ex.run("web_search", {"query": "x"}).message
 

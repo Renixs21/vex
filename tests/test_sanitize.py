@@ -122,3 +122,10 @@ def test_the_agent_says_done_if_the_reply_was_only_notes(tmp_path):
                   executor=Executor(ScriptedConfirmer(), AuditLog(tmp_path / "a.jsonl"), None), memory=mem)
     assert agent.run("hi") == "Done."
     mem.close()
+
+
+def test_glued_sentences_after_an_all_caps_word_are_split_and_a_repeated_answer_collapses():
+    from brain.sanitize import clean_reply
+
+    assert clean_reply("He was born in Hamilton, Ohio, USA.He was born in Hamilton, Ohio, USA.") == "He was born in Hamilton, Ohio, USA."
+    assert clean_reply("The launch was by NASA.The rocket flew.") == "The launch was by NASA. The rocket flew."

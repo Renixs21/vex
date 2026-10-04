@@ -40,6 +40,10 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "orb_mode": "dock", "orb_edge": "right", "orb_edge_y": 0.40, "orb_center_y": 0.50, "orb_radius": 62.0,
         "orb_port": 47474, "orb_click_port": 47475,
     },
+    "web": {
+        "weather_place": "",             # default city for "what's the weather" (blank: Vex asks which city)
+        "units": "metric",               # metric (C, km/h) or imperial (F, mph)
+    },
     "memory": {
         "curator": True,                 # after a conversation, save durable facts from it (see memory/curator.py)
         "curator_idle_seconds": 120,     # a conversation is over after this much quiet

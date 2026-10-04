@@ -15,7 +15,7 @@ from safety.executor import Executor
 from tools import categories, registry
 
 tools.load_all()
-CORE = {"open_app", "open_url", "play_youtube", "web_search", "recall", "remember", "more_tools"}
+CORE = {"open_app", "open_url", "play_youtube", "web_search", "quick_facts", "recall", "remember", "more_tools"}
 
 
 def approx_tokens(tool_list):
@@ -66,7 +66,8 @@ def test_every_description_is_one_short_line():
     ("run powershell: Get-Date", {"shell"}),
     ("shut down the pc", {"shell"}),
     ("cancel the shutdown", {"shell"}),
-    ("what's the weather in Pune?", set()),
+    ("what's the weather in Pune?", {"web"}),
+    ("read this page https://example.com/a for me", {"web"}),
     ("open notepad", set()),
     ("play lofi beats on youtube", set()),
     ("remember that my roommate is Rahul", set()),
@@ -172,7 +173,7 @@ def test_each_request_logs_provider_tools_and_tokens(caplog):
     with caplog.at_level(logging.INFO, logger="vex.llm"):
         g.generate("sys", [{"role": "user", "text": "hi"}], registry.tools_for())
     line = [r.getMessage() for r in caplog.records if "LLM request" in r.getMessage()][0]
-    assert "provider=groq" in line and "tools=7" in line and "prompt_tokens=612" in line and "completion_tokens=9" in line
+    assert "provider=groq" in line and "tools=8" in line and "prompt_tokens=612" in line and "completion_tokens=9" in line
 
 
 # ---- routing simple commands to the small model -------------------------------------------------------------------------------
