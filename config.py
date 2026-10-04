@@ -68,6 +68,12 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "stt_model": "whisper-large-v3-turbo",
         "language": "en",                # "" = let Whisper detect the language (Hindi, Kannada...)
         "stt_prompt": "Hey Vex. Vex, open Notepad. Hey Vex, set the volume.",
+        "stt_timeout_seconds": 3.0,          # Groq Whisper gets this long per attempt (plus stt_timeout_per_audio_second per second of audio)
+        "stt_timeout_per_audio_second": 0.25,
+        "stt_retries": 1,                    # one retry on a timeout or server error, then the backup
+        "stt_fallback": "gemini",            # backup speech recognition: "gemini" (same free key as the brain) or "" for none
+        "stt_fallback_timeout_seconds": 8.0,
+        "edge_warm": True,                   # keep one edge-tts connection open (first sound about 1 s sooner)
         "stt_seconds_per_hour": 7200,    # Groq's free Whisper allowance; checked locally so we fail to typing early
         "tts_order": ["edge", "windows"],   # edge-tts, then the offline Windows voice: never silent. Add "google" first to use Chirp (docs/VOICE.md)
         "edge_candidates": ["en-IN-NeerjaNeural", "en-IN-NeerjaExpressiveNeural", "en-IN-PrabhatNeural", "en-US-AriaNeural", "en-US-AvaNeural",

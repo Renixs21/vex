@@ -12,7 +12,8 @@ from voice.capture import VoiceCapture
 from voice.confirm import VoiceConfirmer
 from voice.recorder import Recorder
 from voice.speaker import VoiceSpeaker
-from voice.stt import GroqWhisper
+from voice.stt import GeminiSTT, GroqWhisper, SttChain
+from voice.edge_warm import WarmEdgeTTS
 from voice.tts import EdgeTTS, GoogleTTS, TTSChain, WindowsTTS
 from voice.usage import UsageStore
 
@@ -46,12 +47,19 @@ def build_voice(cfg: dict | None = None, root: Path | None = None, on_level: Cal
                         no_speech_seconds=cfg["no_speech_seconds"], preroll_ms=cfg["preroll_ms"], on_level=on_level,
                         vad_aggressiveness=cfg["vad_aggressiveness"], grace_ms=int(cfg.get("resume_grace_ms", 0)),
                         resume_ms=int(cfg.get("resume_min_ms", 120)))
-    stt = GroqWhisper(api_key=config.env("GROQ_API_KEY"), model=cfg["stt_model"], language=cfg["language"],
-                      prompt=cfg.get("stt_prompt", ""), usage=usage, seconds_per_hour=cfg["stt_seconds_per_hour"])
+    groq = GroqWhisper(api_key=config.env("GROQ_API_KEY"), model=cfg["stt_model"], language=cfg["language"],
+                       prompt=cfg.get("stt_prompt", ""), usage=usage, seconds_per_hour=cfg["stt_seconds_per_hour"],
+                       timeout=float(cfg.get("stt_timeout_seconds", 3.0)), timeout_per_second=float(cfg.get("stt_timeout_per_audio_second", 0.25)),
+                       retries=int(cfg.get("stt_retries", 1)))
+    providers = [groq]
+    if str(cfg.get("stt_fallback", "gemini")).lower() == "gemini":
+        providers.append(GeminiSTT(api_key=config.env("GEMINI_API_KEY"), model=config.settings["llm"]["gemini_model"], language=cfg["language"],
+                                   timeout=float(cfg.get("stt_fallback_timeout_seconds", 8.0))))
+    stt = SttChain(providers)
     key = root / config.env("GOOGLE_APPLICATION_CREDENTIALS", "google-tts-key.json")
     makers = {"google": lambda: GoogleTTS(cfg["google_voice"], cfg["google_language"], credentials=key,
                                           api_key=config.env("GOOGLE_TTS_API_KEY")),
-              "edge": lambda: EdgeTTS(cfg["edge_voice"]),
+              "edge": lambda: WarmEdgeTTS(cfg["edge_voice"]) if cfg.get("edge_warm", True) else EdgeTTS(cfg["edge_voice"]),
               "windows": lambda: WindowsTTS(cfg.get("windows_voice", ""))}
     providers = [makers[n]() for n in cfg["tts_order"] if n in makers] or [EdgeTTS(cfg["edge_voice"])]
     if not any(p.name == "windows" for p in providers):          # whatever the order says, the offline voice is the last resort

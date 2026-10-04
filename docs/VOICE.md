@@ -111,3 +111,13 @@ while speech recognition is already running. If you carry on talking in that win
 together (the report counts these as "resumed": turns that would have been cut off). If you don't, nothing is lost: no extra time is spent.
 A pause longer than the window can still split a sentence; the report lists turns that did not end like a sentence and were followed by
 another turn within 15 seconds as "possible residual cut-offs". Don't go below 700 ms without looking at these numbers.
+
+## Speed: streaming speech, warm connection, speech-recognition deadline
+* **Sentence streaming** (already in place, unchanged): the reply is split into sentences; sentence 1 is synthesized and played at once while
+  the rest are synthesized in the background and queue behind it. Barge-in cancels the queue.
+* **Warm edge-tts** (`edge_warm = true`): plain edge-tts opens a new connection for every sentence (about 0.7 s handshake + 0.4 s synthesis).
+  Vex now keeps one connection open, opens it at the start of every turn, and reuses it: measured 0.3-0.5 s per sentence instead of 1.3-1.4 s.
+  If the connection drops or anything fails, that sentence goes through plain edge-tts; if edge-tts internals ever change, warm switches itself off.
+* **Speech recognition deadline** (`stt_timeout_seconds = 3.0` + 0.25 s per second of audio): Groq Whisper gets one retry on a timeout or server
+  error, then the same audio goes to Gemini (`stt_fallback = "gemini"`, same free key as the brain; `""` disables). A 429 goes straight to the backup.
+* `latency.jsonl` now records `audio_seconds`, `stt_attempts`, `stt_provider`, `stt_fallback`; the report prints audio length next to STT time.

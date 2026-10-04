@@ -24,6 +24,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+def stt_extra(rows: list[dict]) -> dict:
+    """STT time next to the length of the audio, and how often the backup provider or a retry was needed."""
+    pairs = [(r["audio_seconds"], r["stages"]["stt"]) for r in rows if "audio_seconds" in r and "stt" in r.get("stages", {})]
+    out: dict = {"fallbacks": sum(1 for r in rows if r.get("stt_fallback")), "retries": sum(1 for r in rows if (r.get("stt_attempts") or 1) > 1)}
+    if pairs:
+        out["median_audio_s"] = round(statistics.median(a for a, _ in pairs), 2)
+        out["median_stt_s"] = round(statistics.median(s for _, s in pairs), 2)
+        out["median_stt_per_audio_s"] = round(statistics.median(s / a for a, s in pairs if a > 0), 2)
+    return out
+
+
 STAGES = ("trigger_to_record", "endpoint_wait", "stt", "brain", "tts_first_audio", "total")
 
 
@@ -102,7 +113,7 @@ def slowest(rows: list[dict]) -> list[tuple[str, float]]:
 def summary(rows: list[dict]) -> dict:
     spoken = [r for r in rows if r.get("outcome") == "spoken"]
     return {"turns": len(rows), "spoken": len(spoken), "stages": stage_stats(spoken), "cutoffs": cutoffs(rows),
-            "by_endpoint_ms": by_endpoint(spoken), "slowest": slowest(spoken),
+            "by_endpoint_ms": by_endpoint(spoken), "slowest": slowest(spoken), "stt_detail": stt_extra(spoken),
             "llm_calls_median": statistics.median([r.get("llm_calls", 0) for r in spoken]) if spoken else None,
             "providers": sorted({c["provider"] for r in spoken for c in r.get("llm", [])})}
 
@@ -115,7 +126,7 @@ def print_report(rows: list[dict]) -> None:
     if not rows:
         print("No turns logged yet. Use Vex by voice (hotkey or 'Hey Vex'), then run this again.")
         return
-    print(f"{'time':8} {'via':8} {'endpt':>5} {'stt':>5} {'brain':>5} {'tts':>5} {'TOTAL':>5}  notes")
+    print(f"{'time':8} {'via':8} {'endpt':>5} {'audio':>5} {'stt':>5} {'brain':>5} {'tts':>5} {'TOTAL':>5}  notes")
     for r in rows:
         s = r.get("stages", {})
         notes = []
@@ -123,14 +134,22 @@ def print_report(rows: list[dict]) -> None:
             notes.append(f"RESUMED after a {r.get('resume_gap', 0):.2f}s pause")
         if r.get("llm_calls", 0) > 1:
             notes.append(f"{r['llm_calls']} model calls")
+        if r.get("stt_fallback"):
+            notes.append("backup STT used")
+        if (r.get("stt_attempts") or 1) > 1:
+            notes.append("STT retried")
         if r.get("outcome") != "spoken":
             notes.append(r.get("outcome", "?"))
-        print(f"{r['ts'][11:19]} {r.get('source', '?')[:8]:8} {fmt(s.get('endpoint_wait'))} {fmt(s.get('stt'))} {fmt(s.get('brain'))} "
+        print(f"{r['ts'][11:19]} {r.get('source', '?')[:8]:8} {fmt(s.get('endpoint_wait'))} {fmt(r.get('audio_seconds'))} {fmt(s.get('stt'))} {fmt(s.get('brain'))} "
               f"{fmt(s.get('tts_first_audio'))} {fmt(s.get('total'))}  {'; '.join(notes)}")
     sm = summary(rows)
     print(f"\n{sm['spoken']} spoken turns of {sm['turns']}.   median / 90th percentile / worst, in seconds:")
     for k, v in sm["stages"].items():
         print(f"  {k:18} {v['median']:5.2f} / {v['p90']:5.2f} / {v['max']:5.2f}   ({v['n']} turns)")
+    d = sm["stt_detail"]
+    if "median_audio_s" in d:
+        print(f"  speech recognition: median {d['median_stt_s']} s for {d['median_audio_s']} s of audio ({d['median_stt_per_audio_s']} s per audio second); "
+              f"retried {d['retries']}x, backup used {d['fallbacks']}x")
     c = sm["cutoffs"]
     print(f"\nCut-offs: {c['resumed']} of {c['voice_turns']} voice turns resumed after a pause ({c['resumed_rate']:.0%}), "
           f"{c['possible_residual_cutoffs']} possible residual cut-off(s)."

@@ -74,6 +74,12 @@ no_speech_seconds = 6                  # give up if nothing is said for this lon
 vad_aggressiveness = 2                 # 0-3, higher filters more background noise
 stt_model = "whisper-large-v3-turbo"
 language = "en"                        # "" = let Whisper detect the language (Hindi, Kannada...)
+stt_timeout_seconds = 3.0              # Groq Whisper gets this long per attempt (+ 0.25 s per second of audio), then one retry, then the backup
+stt_timeout_per_audio_second = 0.25
+stt_retries = 1
+stt_fallback = "gemini"                # backup speech recognition if Groq is slow, down or limited ("" = none)
+stt_fallback_timeout_seconds = 8.0
+edge_warm = true                       # keep one edge-tts connection open: the first sound of a reply comes about 1 s sooner
 stt_seconds_per_hour = 7200            # Groq's free Whisper allowance; tracked locally so Vex falls back to typing early
 tts_order = ["edge", "windows"]        # edge-tts (free, no key), then the offline Windows voice. Google Chirp is optional: put "google" first (docs/VOICE.md)
 edge_candidates = ["en-IN-NeerjaNeural", "en-IN-NeerjaExpressiveNeural", "en-IN-PrabhatNeural", "en-US-AriaNeural", "en-US-AvaNeural",

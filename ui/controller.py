@@ -219,6 +219,9 @@ class VexController:
                 log.exception("%s hook failed", label)
 
     def _worker(self, mode: str = "listen", text: str | None = None) -> None:
+        warm = getattr(self.speaker, "warm", None)
+        if warm is not None:
+            warm()                                                # open the speech connection now, so the first sentence skips the handshake
         self._run_hooks(self.on_interaction_start, "start")
         try:
             while True:

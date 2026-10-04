@@ -112,6 +112,12 @@ class VoiceSpeaker:
         """Speak exactly this text (confirmation questions, notices): no summarising, doesn't touch the remainder."""
         self._play(split_sentences(text), on_level)
 
+    def warm(self) -> None:
+        """Open the speech connection ahead of the reply (start of every turn); never blocks or raises."""
+        fn = getattr(self.chain, "warm", None)
+        if fn is not None:
+            fn()
+
     def stop(self) -> None:
         cancel = self._cancel
         if cancel is not None:

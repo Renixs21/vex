@@ -283,6 +283,16 @@ class TTSChain:
         self._told: set[tuple[str, str]] = set()
         self.last_provider: str | None = None
 
+    def warm(self) -> None:
+        """Get providers ready before the reply exists (open the edge-tts connection). Cheap, non-blocking, never raises."""
+        for p in self.providers:
+            fn = getattr(p, "warm", None)
+            if fn is not None:
+                try:
+                    fn()
+                except Exception:  # noqa: BLE001
+                    log.debug("warm-up of %s failed", p.name, exc_info=True)
+
     def google_budget_left(self) -> float | None:
         return None if self.usage is None else self.monthly_limit - self.usage.month_total("google_chars")
 
