@@ -61,6 +61,7 @@ def make_icon(muted: bool = False) -> QIcon:
 class TrayController(QObject):
     _state_sig = Signal(str)
     _health_sig = Signal(str, str)                                  # (summary, report path) from the health check thread
+    _mute_sig = Signal()                                            # refresh the mute icon from any thread
 
     def __init__(self, app: QApplication, controller, frontend, executor, *, config_path: Path | None = None,
                  on_quit: Callable[[], None] | None = None, hotkey_text: str = "Ctrl+Alt+V", parent=None, autostart_api=None):
@@ -110,6 +111,7 @@ class TrayController(QObject):
         self.tray.activated.connect(self._activated)
         self._state_sig.connect(self._on_state)
         self._health_sig.connect(self._health_done)
+        self._mute_sig.connect(self.refresh_mute_icon)
         controller.listeners.append(self._state_sig.emit)       # states arrive from worker threads; the signal marshals
 
     # ---- construction helpers --------------------------------------------------------------------------------------------
@@ -166,6 +168,9 @@ class TrayController(QObject):
             return bool(self.autostart.is_enabled())
         except Exception:  # noqa: BLE001
             return False
+
+    def refresh_mute_icon_threadsafe(self) -> None:
+        self._mute_sig.emit()
 
     def refresh_mute_icon(self) -> None:
         """Icon, tooltip and menu checkmark follow controller.mic_muted (also when it was changed by voice or a hook)."""

@@ -21,6 +21,9 @@ def run_text() -> int:
 
     try:
         agent = Agent()
+        from tools import registry
+
+        registry.load_disabled()                 # tools switched off through the local API stay off here too
         reminders.start()
     except RuntimeError as e:
         print(e)

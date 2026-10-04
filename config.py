@@ -41,6 +41,16 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "orb_mode": "dock", "orb_edge": "right", "orb_edge_y": 0.40, "orb_center_y": 0.50, "orb_radius": 62.0,
         "orb_port": 47474, "orb_click_port": 47475,
     },
+    "api": {
+        "enabled": True,                 # the local websocket API for companion apps (docs/API.md); 127.0.0.1 only, token in data/api_token
+        "port": 47480,
+        "allowed_origins": [],           # browser origins allowed to connect (none by default)
+    },
+    "budget": {
+        "budget_inr": 1000,              # the most you're willing to spend (Google asked for a 1000 rupee prepayment for Cloud TTS)
+        "google_tts_usd_per_million_chars": 30.0,   # Chirp 3 HD list price past the free allowance
+        "usd_to_inr": 88.0,
+    },
     "web": {
         "weather_place": "",             # default city for "what's the weather" (blank: Vex asks which city)
         "units": "metric",               # metric (C, km/h) or imperial (F, mph)

@@ -101,13 +101,24 @@ class ConfirmTracker:
 
     def __init__(self, inner, on_ask):
         self.inner, self.on_ask = inner, on_ask
+        self.watchers: list = []                                # fn(req, answer_or_None): the local API shows prompts (display only)
+
+    def _tell(self, req, answer) -> None:
+        for fn in list(self.watchers):
+            try:
+                fn(req, answer)
+            except Exception:  # noqa: BLE001
+                log.debug("confirm watcher failed", exc_info=True)
 
     def confirm(self, req):
         try:
             self.on_ask()
         except Exception:  # noqa: BLE001
             log.debug("confirm tracker hook failed", exc_info=True)
-        return self.inner.confirm(req)
+        self._tell(req, None)
+        answer = self.inner.confirm(req)
+        self._tell(req, answer)
+        return answer
 
     def __getattr__(self, name):
         return getattr(self.inner, name)
@@ -141,6 +152,37 @@ def app_status(controller, hotkey, wake, orb, tray) -> dict:
     return {"state": controller.state, "hotkey": bool(safe(lambda: hotkey.active, False)), "wakeword": wake_state, "orb": orb_state,
             "mic_muted": bool(controller.mic_muted), "followup": bool(getattr(controller, "followup_enabled", False)),
             "reminders": bool(sched is not None and getattr(sched, "running", False))}
+
+
+def build_api(controller, executor, tray, tracker, dialog, housekeeper, status):
+    """The local API (docs/API.md), or None if it is off or can't start. Never raises: Vex runs the same without it."""
+    import config
+
+    cfg = config.settings.get("api", {})
+    if not cfg.get("enabled", True):
+        return None
+    try:
+        from tools import memory as memory_tools
+        from ui import health
+        from ui.api_core import ApiCore
+        from ui.api_server import ApiServer, load_or_create_token
+
+        def health_fn() -> dict:
+            checks = health.run_checks(status=status())
+            redact = health.Redactor(health.secrets_from_env(config.ROOT))
+            return {"summary": redact(health.summary_line(checks)),
+                    "checks": [{"name": c.name, "status": c.status, "detail": redact(c.detail), "hint": redact(c.hint)} for c in checks]}
+
+        core = ApiCore(controller=controller, executor=executor, tray=tray, memory_factory=memory_tools.get_memory,
+                       dialog_confirmer=dialog, housekeeper=housekeeper, health_fn=health_fn)
+        core.attach()
+        tracker.watchers.append(core.on_confirm)
+        server = ApiServer(core, load_or_create_token(config.ROOT / "data" / "api_token"), port=int(cfg.get("port", 47480)),
+                           allowed_origins=list(cfg.get("allowed_origins", [])))
+        return server if server.start() else None
+    except Exception:  # noqa: BLE001
+        log.exception("local API could not start; Vex runs on without it")
+        return None
 
 
 QUIET_SECONDS = 90.0
@@ -303,8 +345,11 @@ def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: in
     confirmer = (stack.wrap_confirmer(dialog, is_muted=lambda: holder["controller"].mic_muted, on_level=frontend.set_level)
                  if stack else dialog)
 
-    executor = build_default_executor(ConfirmTracker(confirmer, lambda: holder["controller"].note_confirmation()
-                                                     if "controller" in holder else None))
+    tracker = ConfirmTracker(confirmer, lambda: holder["controller"].note_confirmation() if "controller" in holder else None)
+    executor = build_default_executor(tracker)
+    from tools import registry as tool_registry
+
+    tool_registry.load_disabled()                            # tools you switched off stay off (data/tools_disabled.json)
     try:
         agent = Agent(executor=executor)
     except RuntimeError as e:
@@ -337,6 +382,8 @@ def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: in
 
     def cleanup() -> None:
         housekeeper.stop()
+        if holder.get("api") is not None:
+            holder["api"].stop()
         if curator is not None:
             curator.stop()
         if consolidator is not None:
@@ -356,7 +403,7 @@ def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: in
     holder["tray"] = tray
     if quiet:
         tray.set_quiet(QUIET_SECONDS)
-    controller.on_mute_change.append(tray.refresh_mute_icon)
+    controller.on_mute_change.append(tray.refresh_mute_icon_threadsafe)
 
     def open_viewer() -> None:
         if "viewer" not in holder:
@@ -417,6 +464,8 @@ def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: in
         return health.summary_line(checks), str(path)
 
     tray.on_health = run_health
+    api = build_api(controller, executor, tray, tracker, dialog, housekeeper, status)
+    holder["api"] = api
     controller.listeners.append(lambda st: st == "idle" and health.write_heartbeat(heartbeat_path, status()))   # never a stale "followup"
     watchdog = QTimer()
     watchdog.timeout.connect(tick)

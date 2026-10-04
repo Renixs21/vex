@@ -140,6 +140,8 @@ class VexController:
         self.on_interaction_start: list[Callable[[], None]] = []
         self.on_interaction_end: list[Callable[[], None]] = []
         self.on_mute_change: list[Callable[[], None]] = []             # after the microphone is muted/unmuted (read controller.mic_muted)
+        self.on_park_change: list[Callable[[], None]] = []             # after Vex parks (asleep) or wakes up again (read controller.asleep)
+        self.asleep = False                                            # parked as the pill by "go to sleep" / the API, until the next interaction
         self.on_turn: list[Callable[[str, str], None]] = []       # (what you said, Vex's reply) after each answered turn
         self.listeners: list[Callable[[str], None]] = []       # called with the new state on every change
         self.on_wakeword_toggle: list[Callable[[bool], None]] = []   # the tray's Wake word switch (listener comes later)
@@ -313,7 +315,27 @@ class VexController:
             except Exception:  # noqa: BLE001 - a broken hook must not wedge the interaction
                 log.exception("%s hook failed", label)
 
+    def park(self) -> None:
+        """Go to sleep now (from the API / tray): the orb shrinks into the pill, wake word only. Ignored while busy."""
+        with self._lock:
+            if self.state != IDLE or (self._thread is not None and self._thread.is_alive()):
+                return
+        self.frontend.show_caption("")
+        self.frontend.hide()
+        self._set_asleep(True)
+
+    def unpark(self) -> None:
+        """Wake the orb up again (from the API / tray) without listening."""
+        self.frontend.show()
+        self._set_asleep(False)
+
+    def _set_asleep(self, value: bool) -> None:
+        if self.asleep != value:
+            self.asleep = value
+            self._run_hooks(self.on_park_change, "park change")
+
     def _worker(self, mode: str = "listen", text: str | None = None) -> None:
+        self._set_asleep(False)                                   # any interaction wakes Vex up
         warm = getattr(self.speaker, "warm", None)
         if warm is not None:
             warm()                                                # open the speech connection now, so the first sentence skips the handshake
@@ -341,6 +363,7 @@ class VexController:
                 self.frontend.show_caption("")
                 self.frontend.hide()
                 log.info("parked: orb -> pill, wake word only")
+                self._set_asleep(True)
             self._run_hooks(self.on_interaction_end, "end")
             self._flush_announcements()
 

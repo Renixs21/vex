@@ -99,7 +99,7 @@ def get(name: str) -> Tool | None:
 
 def tools_for(categories: set[str] | frozenset[str] = frozenset()) -> list[Tool]:
     """The tools to offer the LLM: every core tool plus those in the given categories."""
-    return [t for t in _TOOLS.values() if t.category == "core" or t.category in categories]
+    return [t for t in _TOOLS.values() if (t.category == "core" or t.category in categories) and t.name not in _disabled]
 
 
 def execute(name: str, args: dict | None) -> ToolResult:
@@ -116,3 +116,52 @@ def execute(name: str, args: dict | None) -> ToolResult:
     except Exception as e:  # noqa: BLE001 - tool errors must not escape into the agent loop
         log.exception("tool %s failed", name)
         return ToolResult(False, f"{name} failed: {e}")
+
+
+# ---- switching tools off ------------------------------------------------------------------------------------------------------------------
+# A switched-off tool is never offered to the model and the executor refuses to run it. The set is saved in data/tools_disabled.json.
+# Nothing switches a tool back on by itself; a red tool can only be switched back on after an on-screen confirmation (ui/api_core.py).
+_disabled: set[str] = set()
+_disabled_path = None
+
+
+def _default_disabled_path():
+    from config import ROOT
+
+    return ROOT / "data" / "tools_disabled.json"
+
+
+def load_disabled(path=None) -> set[str]:
+    """Read the switched-off set (at startup). Unknown or unreadable file: nothing switched off."""
+    import json
+
+    global _disabled_path
+    _disabled_path = path or _default_disabled_path()
+    try:
+        names = json.loads(_disabled_path.read_text(encoding="utf-8")).get("disabled", [])
+        _disabled.clear()
+        _disabled.update(str(n) for n in names)
+    except (OSError, ValueError, AttributeError):
+        _disabled.clear()
+    return set(_disabled)
+
+
+def is_enabled(name: str) -> bool:
+    return name not in _disabled
+
+
+def set_enabled(name: str, enabled: bool) -> None:
+    """Switch a tool on/off and save the choice. The caller decides whether that is allowed (red tools need an on-screen yes)."""
+    import json
+
+    (_disabled.discard if enabled else _disabled.add)(name)
+    path = _disabled_path or _default_disabled_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"disabled": sorted(_disabled)}), encoding="utf-8")
+    except OSError:
+        log.warning("could not save the switched-off tools", exc_info=True)
+
+
+def disabled() -> set[str]:
+    return set(_disabled)

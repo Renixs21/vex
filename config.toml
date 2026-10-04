@@ -40,6 +40,16 @@ orb_autosleep = 20                   # seconds idle before the orb returns to th
 orb_port = 47474                     # Vex -> orb (UDP, localhost)
 orb_click_port = 47475               # orb -> Vex: clicking the orb starts listening
 
+[api]
+enabled = true                       # local websocket API for companion apps (docs/API.md): 127.0.0.1 only, token in data/api_token
+port = 47480
+allowed_origins = []                 # browser origins allowed to connect (none)
+
+[budget]
+budget_inr = 1000                    # what you're willing to spend: only Google Cloud TTS (off by default) can cost money
+google_tts_usd_per_million_chars = 30.0
+usd_to_inr = 88.0
+
 [web]
 weather_place = ""                   # default city for "what's the weather"; blank = Vex asks
 units = "metric"                     # metric (C, km/h) or imperial (F, mph)

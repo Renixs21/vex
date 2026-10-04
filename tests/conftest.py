@@ -108,3 +108,21 @@ def _never_talk_to_the_real_orb(monkeypatch):
         return real_send(self, **msg)
 
     monkeypatch.setattr(orb_frontend.OrbFrontend, "_send", guarded)
+
+
+@pytest.fixture(autouse=True)
+def _switched_off_tools_live_in_a_temp_file(tmp_path_factory):
+    """Switching a tool on/off in a test never writes data/tools_disabled.json, and every test starts with all tools on."""
+    from tools import registry
+
+    registry.load_disabled(tmp_path_factory.mktemp("tools") / "tools_disabled.json")
+    yield
+    registry._disabled.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_local_api(monkeypatch):
+    """A test that boots the app never opens the real API port or writes data/api_token (API tests start their own server)."""
+    import config
+
+    monkeypatch.setitem(config.settings.setdefault("api", {}), "enabled", False)

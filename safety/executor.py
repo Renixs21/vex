@@ -42,6 +42,7 @@ class Executor:
         self.undo = undo
         self._dry_run = dry_run
         self.elevation = ElevationPolicy()        # when may a command run as administrator (see safety/elevation.py)
+        self.listeners: list = []                 # fn(event: dict): {"event": "tool_start"|"tool_end", ...} (the local API's feed)
 
     @property
     def dry_run(self) -> bool:
@@ -59,6 +60,10 @@ class Executor:
         if tool is None:
             self.audit.record(tool=name, tier="?", decision="unknown_tool", ok=False)
             return ToolResult(False, f"Unknown tool '{name}'.")
+
+        if not registry.is_enabled(name):
+            self.audit.record(tool=name, tier=tool.tier, decision="disabled", ok=False)
+            return ToolResult(False, f"The {name} tool is switched off. The user can switch it back on.")
 
         schema = tool.parameters
         args = {k: v for k, v in (args or {}).items() if k in schema["properties"]}     # drop anything undeclared
@@ -86,6 +91,7 @@ class Executor:
                 log.info("%s: admin=true was not backed by the user; running without administrator rights", name)
 
         decision = policy.classify(tool, args)
+        self._emit({"event": "tool_start", "tool": name, "tier": decision.tier})
         if decision.blocked:
             return self._finish(tool, decision.tier, "blocked", ToolResult(False, f"I can't do that: {decision.reason}."),
                                 args, reason=decision.reason)
@@ -164,9 +170,18 @@ class Executor:
             data, message = None, message + " (extra data omitted: too large)"
         return ToolResult(result.ok, message, data, undo=result.undo, audit=result.audit)
 
+    def _emit(self, event: dict) -> None:
+        for fn in list(self.listeners):
+            try:
+                fn(event)
+            except Exception:  # noqa: BLE001 - a listener must never affect a tool call
+                log.debug("executor listener failed", exc_info=True)
+
     def _finish(self, tool, tier: str, decision: str, result: ToolResult, args: dict, reason: str | None = None,
                 started: float | None = None, extra: dict | None = None) -> ToolResult:
         clean = self._sanitize(result)
+        self._emit({"event": "tool_end", "tool": tool.name, "tier": tier, "decision": decision, "ok": clean.ok,
+                    "summary": (clean.message if tool.audit_args else (clean.audit or ""))[:200]})
         summary = clean.message if tool.audit_args else (clean.audit or "")
         entry = self.audit.record(
             tool=tool.name, tier=tier, decision=decision, ok=clean.ok, args=args if tool.audit_args else None,
