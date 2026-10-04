@@ -25,6 +25,7 @@ from voice.timeline import timeline
 log = logging.getLogger("vex.controller")
 
 IDLE, LISTENING, THINKING, SPEAKING = "idle", "listening", "thinking", "speaking"
+FOLLOWUP = "followup"           # the window after a reply: listening without the wake word (the orb shows "listening")
 
 _READ_REST = re.compile(
     r"^(?:please\s+)?(?:(?:read|say|speak)\s+(?:me\s+)?(?:the\s+)?(?:rest|remaining|remainder|everything|it\s+all|all\s+of\s+it|"
@@ -43,6 +44,18 @@ def is_sleep(text: str) -> bool:
     """True for 'sleep', 'go to sleep', 'dock', 'that's all', ... : the orb shrinks back into the edge pill."""
     t = re.sub(r"[^a-z\s']", " ", (text or "").lower())
     return bool(_SLEEP.match(" ".join(t.split())))
+
+
+_FOLLOWUP_END = re.compile(
+    r"^(?:(?:ok(?:ay)?|no|nope)\s+)?(?:that(?:'|\s)?s\s+(?:all|it|everything)(?:\s+for\s+now)?|thanks?(?:\s+you)?(?:\s+(?:so\s+much|a\s+lot))?|"
+    r"thank\s+you(?:\s+(?:so\s+much|a\s+lot))?|stop\s+listening|nothing(?:\s+else)?|never\s*mind|i'?m\s+(?:good|done)|"
+    r"no\s+thanks?|that\s+will\s+be\s+all|we'?re\s+done)(?:\s+(?:vex|please))*$")
+
+
+def is_followup_end(text: str) -> bool:
+    """In the follow-up window: 'that's all', 'thanks Vex', 'stop listening', ... end the window at once, quietly."""
+    t = re.sub(r"[^a-z\s']", " ", (text or "").lower().replace("’", "'"))
+    return bool(_FOLLOWUP_END.match(" ".join(t.split())))
 
 
 def is_read_rest(text: str) -> bool:
@@ -88,6 +101,14 @@ class VexController:
         self._pending: tuple[str, str | None] | None = None      # the next turn queued by a barge-in (typed text / typed prompt)
         self.chime: Callable[[], None] | None = None             # played before Vex speaks on its own (a reminder)
         self._announcements: list[str] = []                      # things to say on Vex's own initiative, waiting for their turn
+        # follow-up listening: after a spoken reply, listen for this long without the wake word (the app sets these from [voice])
+        self.followup_enabled = True
+        self.followup_seconds = 8.0
+        self.followup_min_speech_ms = 250                        # voiced audio needed before the window counts it as speech
+        self.followup_delay_s = 0.3                              # after playback has fully ended (Vex's own tail / room echo)
+        self._confirm_asked = False
+        self._last_outcome = ""
+        self._sleep = time.sleep
 
     # ---- triggers ----------------------------------------------------------------------------------------------------
     def start_listening(self, source: str = "hotkey", typed: bool = False) -> str:
@@ -106,6 +127,12 @@ class VexController:
             if self.mic_muted and not typed:
                 self.frontend.show_caption("The microphone is muted.")
                 return "muted"
+            if self.state == FOLLOWUP:                               # the window is open: end it and run this trigger as a normal turn
+                log.info("follow-up window interrupted by %s", source)
+                self._pending = ("typed", None) if typed else None
+                self._barge_in = True
+                self.cancel_capture()
+                return "barge_in"
             if self.state == SPEAKING:
                 log.info("barge-in from %s", source)
                 self._pending = ("typed", None) if typed else None
@@ -121,10 +148,13 @@ class VexController:
         with self._lock:
             if self._shutdown:
                 return "busy"
-            if self.state == SPEAKING:                           # stop talking, then run this text as the next turn
+            if self.state in (SPEAKING, FOLLOWUP):              # stop talking / listening, then run this text as the next turn
                 self._pending = ("text", text)
                 self._barge_in = True
-                self.speaker.stop()
+                if self.state == FOLLOWUP:
+                    self.cancel_capture()
+                else:
+                    self.speaker.stop()
                 return "barge_in"
             if self.state == IDLE and not (self._thread is not None and self._thread.is_alive()):
                 timeline.begin(source)
@@ -143,6 +173,8 @@ class VexController:
             if self.state != IDLE or (self._thread is not None and self._thread.is_alive()):
                 self._announcements.append(text)
                 log.info("announcement queued: Vex is busy (%s)", self.state)
+                if self.state == FOLLOWUP:                            # don't make a reminder wait for the window: close it now
+                    self.cancel_capture()
                 return "queued"
             return self._spawn("announce", text, "announce")
 
@@ -177,7 +209,7 @@ class VexController:
 
     def set_mic_muted(self, muted: bool) -> None:
         self.mic_muted = muted
-        if muted and self.state == LISTENING:
+        if muted and self.state in (LISTENING, FOLLOWUP):
             self.cancel_capture()
         self._run_hooks(self.on_mute_change, "mute change")           # the app stops/starts the wake word listener, the tray icon follows
 
@@ -204,9 +236,13 @@ class VexController:
         return True
 
     # ---- the turn ----------------------------------------------------------------------------------------------------
+    def note_confirmation(self) -> None:
+        """A confirmation question was asked during this turn (its own input flow): no follow-up window after it."""
+        self._confirm_asked = True
+
     def _set_state(self, state: str) -> None:
         self.state = state
-        self.frontend.set_state(state)
+        self.frontend.set_state(LISTENING if state == FOLLOWUP else state)    # the visuals know four states; the window looks like listening
         for cb in list(self.listeners):
             try:
                 cb(state)
@@ -229,11 +265,17 @@ class VexController:
             while True:
                 self._barge_in = False
                 self._turn(mode, text)
-                if not self._barge_in or self._shutdown:
+                if self._shutdown:
                     break
-                mode, text = self._pending or ("listen", None)    # after a barge-in: the queued turn, else just listen
-                self._pending = None
-                timeline.begin("barge_in")
+                if self._barge_in:
+                    mode, text = self._pending or ("listen", None)    # after a barge-in: the queued turn, else just listen
+                    self._pending = None
+                    timeline.begin("barge_in")
+                    continue
+                if not self._should_follow_up(mode):
+                    break
+                mode, text = "followup", None                     # keep listening a little: no wake word needed for the next thing
+                timeline.begin("followup")
         finally:
             self._active_capture = None
             self._set_state(IDLE)
@@ -260,13 +302,67 @@ class VexController:
         finally:
             self.frontend.set_level(0.0)
 
+    def _should_follow_up(self, mode: str) -> bool:
+        """Open the follow-up window after this turn? Only after a spoken answer to something you SAID, never after silence, an error,
+        a confirmation question, a typed command, a reminder, 'sleep', or while muted; and only if the capture can do it."""
+        why = None
+        if not self.followup_enabled or self.followup_seconds <= 0:
+            why = "off"
+        elif mode not in ("listen", "followup"):
+            why = f"{mode} turn"
+        elif self._last_outcome not in ("spoken", "read_rest"):
+            why = self._last_outcome or "no outcome"
+        elif self._confirm_asked:
+            why = "a confirmation was asked"
+        elif self.mic_muted or self._sleep_after or self._announcements:
+            why = "muted" if self.mic_muted else ("sleep" if self._sleep_after else "an announcement is waiting")
+        elif not hasattr(self.capture, "listen_followup"):
+            why = "capture can't"
+        if why is not None:
+            log.debug("no follow-up window (%s)", why)
+            return False
+        return True
+
+    def _followup_capture(self) -> str | None:
+        """The window itself: wait for the speaker's tail to die away, show 'still listening', then listen without the wake word."""
+        self._set_state(FOLLOWUP)
+        self.frontend.show_caption("Still listening…")
+        extra = max(0.0, self.followup_delay_s - float(getattr(self.speaker, "guard_s", 0.0) or 0.0))
+        if extra > 0:
+            self._sleep(extra)                                       # the speaker already waited guard_s after the last sound
+        if self._barge_in or self._shutdown:
+            return None
+        log.info("follow-up window open for %.0f s", self.followup_seconds)
+        self._active_capture = self.capture
+        text = self.capture.listen_followup(self.followup_seconds, self.followup_min_speech_ms)
+        if not text:
+            log.info("follow-up window closed%s", " (interrupted)" if self._barge_in else " in silence: back to the wake word")
+        return text
+
     def _turn(self, mode: str = "listen", given: str | None = None) -> None:
+        self._confirm_asked = False
         if mode == "announce":
             self._announce_turn(given or "")
+            self._last_outcome = "announce"
             return
-        outcome = "no_speech"
+        outcome = "followup_expired" if mode == "followup" else "no_speech"
         try:
-            if mode == "text":
+            if mode == "followup":
+                text = self._followup_capture()
+                if not text and self._barge_in:
+                    outcome = "followup_cancelled"
+                if text:
+                    raw = text
+                    text = strip_wake_phrase(text)                       # "Hey Vex, and the weather?" works too
+                    if text != raw.strip():
+                        log.info("wake phrase in transcript: %r -> %r", raw, text)
+                    if is_followup_end(text):                            # "that's all" / "thanks Vex": done, quietly
+                        log.info("follow-up ended by %r", text)
+                        outcome = "followup_end"
+                        self._sleep_after = True
+                        self.frontend.show_caption("")
+                        return
+            elif mode == "text":
                 text = given
             else:
                 self._set_state(LISTENING)
@@ -313,6 +409,8 @@ class VexController:
             self.frontend.show_caption("Something went wrong. Try again.")
         finally:
             self.frontend.set_level(0.0)
+            self._last_outcome = outcome
+            timeline.set(followup=mode == "followup")
             timeline.finish(outcome)
 
     def _read_rest(self, text: str) -> bool:

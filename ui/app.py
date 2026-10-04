@@ -96,6 +96,23 @@ def build_wakeword(controller, stack, notify):
     return listener
 
 
+class ConfirmTracker:
+    """Passes confirmations through unchanged and tells the controller one was asked (no follow-up window after a confirmation)."""
+
+    def __init__(self, inner, on_ask):
+        self.inner, self.on_ask = inner, on_ask
+
+    def confirm(self, req):
+        try:
+            self.on_ask()
+        except Exception:  # noqa: BLE001
+            log.debug("confirm tracker hook failed", exc_info=True)
+        return self.inner.confirm(req)
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+
 QUIET_SECONDS = 90.0
 WATCHDOG_SECONDS = 30
 MAX_RESTARTS = 3
@@ -256,7 +273,8 @@ def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: in
     confirmer = (stack.wrap_confirmer(dialog, is_muted=lambda: holder["controller"].mic_muted, on_level=frontend.set_level)
                  if stack else dialog)
 
-    executor = build_default_executor(confirmer)
+    executor = build_default_executor(ConfirmTracker(confirmer, lambda: holder["controller"].note_confirmation()
+                                                     if "controller" in holder else None))
     try:
         agent = Agent(executor=executor)
     except RuntimeError as e:
@@ -266,6 +284,10 @@ def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: in
     controller = VexController(agent, frontend, stack.speaker if stack else SimulatedSpeaker(),
                                stack.capture if stack else typed, typed_capture=typed)
     holder["controller"] = controller
+    controller.followup_enabled = bool(voice_cfg.get("followup_enabled", True))
+    controller.followup_seconds = float(voice_cfg.get("followup_s", 8))
+    controller.followup_min_speech_ms = int(voice_cfg.get("followup_min_speech_ms", 250))
+    controller.followup_delay_s = float(voice_cfg.get("followup_delay_ms", 300)) / 1000
     timeline.configure(config.ROOT / config.settings["paths"]["logs"] / "latency.jsonl")
     from voice.chime import play_reminder_chime
 

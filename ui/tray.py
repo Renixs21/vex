@@ -19,7 +19,8 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 log = logging.getLogger("vex.tray")
 
-STATUS = {"idle": "Ready", "listening": "Listening…", "thinking": "Thinking…", "speaking": "Speaking"}
+STATUS = {"idle": "Ready", "listening": "Listening…", "thinking": "Thinking…", "speaking": "Speaking",
+          "followup": "Still listening (no wake word needed)…"}
 
 
 def make_icon(muted: bool = False) -> QIcon:
@@ -90,6 +91,8 @@ class TrayController(QObject):
         self._add("show", "Show Vex", self._toggle_visual, checked=True)
         self._add("mute", "Mute mic / pause listening", self._toggle_mic, checked=controller.mic_muted)
         self._add("wakeword", "Wake word", self._toggle_wakeword, checked=bool(config.settings["wakeword"]["enabled"]))
+        self._add("followup", "Follow-up listening", self._toggle_followup,
+                  checked=bool(getattr(controller, "followup_enabled", config.settings["voice"].get("followup_enabled", True))))
         self._add("autostart", "Start with Windows", self._toggle_autostart, checked=self._autostart_on())
         self._add("dry_run", "Dry run (change nothing)", self._toggle_dry_run, checked=bool(executor.dry_run))
         self.menu.addSeparator()
@@ -224,6 +227,15 @@ class TrayController(QObject):
                 cb(checked)
             except Exception:  # noqa: BLE001
                 log.exception("wake word toggle hook failed")
+
+    def _toggle_followup(self, checked: bool) -> None:
+        self.controller.followup_enabled = checked
+        try:
+            config.set_toml_value("voice", "followup_enabled", checked, path=self.config_path)
+        except OSError as e:
+            log.warning("could not save the follow-up setting: %s", e)
+        self.notify("Follow-up listening", "On: after a reply Vex keeps listening for a few seconds, no wake word needed." if checked
+                    else "Off: say \"Hey Vex\" (or press the hotkey) before every command.")
 
     def _toggle_dry_run(self, checked: bool) -> None:
         self.executor.set_dry_run(checked)

@@ -272,12 +272,12 @@ class Recorder:
 
     # ---- recording -------------------------------------------------------------------------------------------------------
     def record(self, cancel: threading.Event | None = None, no_speech_seconds: float | None = None,
-               max_seconds: float | None = None) -> Recording:
+               max_seconds: float | None = None, min_speech_ms: int | None = None) -> Recording:
         """Block until one utterance has been captured. Raises MicUnavailable if the microphone can't be used."""
         self._peak = 0.0
         log.info("recording started (device %s)", self.device if self.device is not None else "default")
         try:
-            out = self._record(cancel, no_speech_seconds, max_seconds)
+            out = self._record(cancel, no_speech_seconds, max_seconds, min_speech_ms)
         except MicUnavailable as e:
             log.warning("recording failed: %s", e)
             raise
@@ -286,8 +286,9 @@ class Recorder:
         log.info("recording ended: %.1fs total, %.1fs of speech, peak RMS %.0f (%s)", out.seconds, out.speech_seconds, out.peak_rms, out.reason)
         return out
 
-    def _record(self, cancel, no_speech_seconds, max_seconds) -> Recording:
+    def _record(self, cancel, no_speech_seconds, max_seconds, min_speech_ms=None) -> Recording:
         no_speech = self.no_speech_seconds if no_speech_seconds is None else no_speech_seconds
+        min_speech = self.min_speech_ms if min_speech_ms is None else min_speech_ms     # follow-ups demand more voiced audio to start
         limit = self.max_seconds if max_seconds is None else max_seconds
         frames: "queue.Queue[np.ndarray]" = queue.Queue()
         rate_holder = {"rate": RATE}
@@ -343,7 +344,7 @@ class Recorder:
                 if not started:
                     preroll.append(frame)
                     voiced = voiced + 1 if is_speech else 0
-                    if voiced * FRAME_MS >= self.min_speech_ms:
+                    if voiced * FRAME_MS >= min_speech:
                         started = True
                         speech = list(preroll)
                         silence = 0

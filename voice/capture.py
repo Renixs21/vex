@@ -36,17 +36,33 @@ class VoiceCapture:
         self._told_near_silent = False
 
     def __call__(self) -> str | None:
+        return self._capture()
+
+    def listen_followup(self, seconds: float, min_speech_ms: int = 250) -> str | None:
+        """The follow-up window after a reply: listen up to `seconds` for speech to START (no wake word needed). Same endpointing and
+        pipeline as a normal turn once you talk. Stricter start (`min_speech_ms` of voiced audio) so a cough or the room doesn't count.
+        Quiet on failure: None (no typed prompt, no "can't hear you" toast), because you didn't ask for anything."""
+        return self._capture(no_speech_seconds=seconds, min_speech_ms=min_speech_ms, followup=True)
+
+    def _capture(self, no_speech_seconds: float | None = None, min_speech_ms: int | None = None, followup: bool = False) -> str | None:
         self._cancel = threading.Event()
         if not self.stt.available:
+            if followup:
+                return None
             return self._typed("noKey", "Speech recognition isn't set up (no GROQ_API_KEY), so type your command instead.")
         timeline.mark("capture_start")
         try:
-            rec = self.recorder.record(self._cancel)
+            if followup:
+                rec = self.recorder.record(self._cancel, no_speech_seconds=no_speech_seconds, min_speech_ms=min_speech_ms)
+            else:
+                rec = self.recorder.record(self._cancel)
         except MicUnavailable as e:
             log.warning("microphone unavailable: %s", e)
+            if followup:
+                return None
             return self._typed("mic", "Vex can't use the microphone. Check Windows Settings > Privacy > Microphone "
                                       "(allow desktop apps). Type your command instead.")
-        if rec.peak_rms < NEAR_SILENT_RMS and rec.reason != "cancelled":
+        if rec.peak_rms < NEAR_SILENT_RMS and rec.reason != "cancelled" and not followup:
             muted = default_mic_muted()
             log.warning("mic is near-silent (RMS %.1f): nothing louder than this was heard%s", rec.peak_rms,
                         "; WINDOWS HAS THE MICROPHONE MUTED" if muted else "")

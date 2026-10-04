@@ -71,6 +71,10 @@ resume_grace_ms = 500                  # safeguard: keep listening this long aft
 resume_min_ms = 120                    # if you talk at least this long in that window the recording is extended and both parts are transcribed together; 0 = off
 max_seconds = 20
 no_speech_seconds = 6                  # give up if nothing is said for this long
+followup_enabled = true                # after a spoken reply keep listening briefly, no wake word needed (tray: Follow-up listening)
+followup_s = 8                         # how long that window stays open (0 = off)
+followup_min_speech_ms = 250           # voiced audio needed to count as speech in the window (stricter than a normal turn)
+followup_delay_ms = 300                # the window opens this long after Vex's voice has fully stopped (its own echo)
 vad_aggressiveness = 2                 # 0-3, higher filters more background noise
 stt_model = "whisper-large-v3-turbo"
 language = "en"                        # "" = let Whisper detect the language (Hindi, Kannada...)

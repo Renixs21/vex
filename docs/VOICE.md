@@ -121,3 +121,23 @@ another turn within 15 seconds as "possible residual cut-offs". Don't go below 7
 * **Speech recognition deadline** (`stt_timeout_seconds = 3.0` + 0.25 s per second of audio): Groq Whisper gets one retry on a timeout or server
   error, then the same audio goes to Gemini (`stt_fallback = "gemini"`, same free key as the brain; `""` disables). A 429 goes straight to the backup.
 * `latency.jsonl` now records `audio_seconds`, `stt_attempts`, `stt_provider`, `stt_fallback`; the report prints audio length next to STT time.
+
+## Follow-up listening
+After Vex answers something you **said**, it keeps listening for `[voice] followup_s` seconds (default 8) without "Hey Vex" or the hotkey.
+The orb stays in its listening look (so it doesn't dock), the caption says "Still listening…", the tray says "Still listening (no wake word
+needed)". Speak and it is a normal turn (same endpointing, same pipeline), after which the window opens again. Silence: the window closes
+quietly and Vex is back to wake-word-only mode (the orb's auto-sleep timer then runs as usual).
+
+* **Not its own voice:** the window opens only after playback has fully ended plus `followup_delay_ms` (300), and needs
+  `followup_min_speech_ms` (250 ms; a normal turn needs 150) of speech before it counts. A quiet room in the window never triggers the
+  "Vex can't hear you" notice, and a missing mic/key never pops up the typing box.
+* **No window** after: silence, an error, a typed command, a reminder, "sleep", any turn where Vex asked a confirmation question (that flow
+  has its own input), while muted, or with `followup_enabled = false` / `followup_s = 0` / tray > **Follow-up listening** off.
+* **Ending it:** "that's all", "thanks Vex", "thank you", "stop listening", "nothing else", "never mind", "I'm done" said in the window close
+  it at once, without a reply, and park the orb. The hotkey, a typed command or a click during the window end it and start a normal turn;
+  a reminder closes it and is spoken; muting closes it.
+* `latency.jsonl` has `"followup": true/false`; follow-up turns show as `followup` in the report's "via" column, and the report counts
+  windows opened / used / closed in silence / ended by a phrase.
+
+Why this was needed: after a reply only the wake-word scorer was re-armed (`on_interaction_end` -> `WakeWordListener.resume`, with a
+0.6 s settle), the recorder itself only opens inside a turn, so anything said without "Hey Vex" was scored for the wake phrase and dropped.

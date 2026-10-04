@@ -112,7 +112,11 @@ def slowest(rows: list[dict]) -> list[tuple[str, float]]:
 
 def summary(rows: list[dict]) -> dict:
     spoken = [r for r in rows if r.get("outcome") == "spoken"]
+    windows = [r for r in rows if r.get("source") == "followup"]
+    used = [r for r in windows if r.get("outcome") not in ("followup_expired", "followup_end")]
     return {"turns": len(rows), "spoken": len(spoken), "stages": stage_stats(spoken), "cutoffs": cutoffs(rows),
+            "followup": {"windows": len(windows), "used": len(used), "expired": sum(1 for r in windows if r.get("outcome") == "followup_expired"),
+                         "ended_by_phrase": sum(1 for r in windows if r.get("outcome") == "followup_end")},
             "by_endpoint_ms": by_endpoint(spoken), "slowest": slowest(spoken), "stt_detail": stt_extra(spoken),
             "llm_calls_median": statistics.median([r.get("llm_calls", 0) for r in spoken]) if spoken else None,
             "providers": sorted({c["provider"] for r in spoken for c in r.get("llm", [])})}
@@ -157,6 +161,10 @@ def print_report(rows: list[dict]) -> None:
     for ms, g in sm["by_endpoint_ms"].items():
         print(f"  silence setting {ms} ms: {g['turns']} turns, median total {g['median_total']} s, median endpoint wait {g['median_endpoint_wait']} s, "
               f"resumed {g['resumed']}; the same turns would have taken about {g['estimated_median_total_at_1000ms']} s at 1000 ms")
+    f = sm["followup"]
+    if f["windows"]:
+        print(f"\nFollow-up windows: {f['windows']} opened, {f['used']} used for another command, {f['expired']} closed in silence, "
+              f"{f['ended_by_phrase']} ended by 'that's all'/'thanks'.")
     if sm["slowest"]:
         print("\nSlowest stages (median): " + ", ".join(f"{k} {v:.2f}s" for k, v in sm["slowest"][:3]))
 
