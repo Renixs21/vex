@@ -80,7 +80,7 @@ tts_quota_pause_seconds = 3600         # after a quota/billing error, skip Googl
 windows_voice = ""                     # blank = the Windows default voice
 google_voice = "en-US-Chirp3-HD-Aoede"
 google_language = "en-US"
-edge_voice = "en-US-AriaNeural"
+edge_voice = "en-US-AvaNeural"
 tts_monthly_free_chars = 1000000       # Google's free monthly characters for Chirp 3 HD (check your console)
 tts_switch_fraction = 0.9              # switch to edge-tts at this share of the allowance
 spoken_max_chars = 280
