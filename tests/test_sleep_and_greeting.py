@@ -72,7 +72,8 @@ def test_done_intents_are_not_confused_with_real_requests():
     for t in ["play sleep music", "stop the music", "go to sleep in ten minutes", "thanks for the weather, now play music",
               "what's the weather tomorrow?", "no", "okay"]:
         assert done_intent(t) is None, t
-    assert done_intent("thank you so much") == "thanks" and done_intent("thanks Vex") == "thanks"
+    for t in ["thank you so much", "thanks Vex", "nothing else", "never mind"]:      # not fast-path any more: the brain decides
+        assert done_intent(t) is None, t
 
 
 def test_after_sleep_the_heartbeat_shows_idle_not_followup():

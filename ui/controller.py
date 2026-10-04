@@ -43,12 +43,14 @@ _SLEEP = re.compile(r"^(?:please\s+)?(?:go\s+(?:back\s+)?to\s+sleep|go\s+to\s+th
 _LEAD = re.compile(r"^(?:stop|wait|hold\s+on|no(?!\s+thanks?\b)|nope|nah|okay|ok|alright|all\s+right|right|so|well|now|please|just|and|then|hey|vex|hey\s+vex|"
                    r"you\s+(?:can|may|could)|can\s+you|could\s+you|will\s+you|i\s+said)\s+")
 _TRAIL = re.compile(r"\s+(?:now|please|vex|then|for\s+now|for\s+today|thanks|thank\s+you|okay|ok)$")
+# The fast path: short, clear sleep commands only. Everything else goes to the brain, which has the go_to_sleep tool.
 _DONE = re.compile(r"^(?:go\s+(?:back\s+)?to\s+sleep|sleep(?:\s+mode)?|go\s+(?:back\s+)?to\s+(?:your\s+|the\s+)?(?:dock|doc|edge|pill)|"
-                   r"(?:dock|hide|minimi[sz]e)(?:\s+yourself)?|good\s*bye|bye(?:\s+bye)?|see\s+you(?:\s+later)?|good\s*night|"
-                   r"that(?:'|\s)?s\s+(?:all|it|everything)|that\s+will\s+be\s+all|stop\s+listening|i'?m\s+(?:done|good)|we'?re\s+done|"
-                   r"nothing(?:\s+else)?|never\s*mind|no\s+thanks?|thanks?(?:\s+you)?(?:\s+(?:so\s+much|a\s+lot))?|"
-                   r"thank\s+you(?:\s+(?:so\s+much|a\s+lot))?)$")
-_THANKS = re.compile(r"^(?:thanks?|thank\s+you)(?:\s+(?:you|so\s+much|a\s+lot))*$")
+                   r"(?:dock|hide|minimi[sz]e)(?:\s+yourself)?|good\s*bye|bye(?:\s+bye)?|good\s*night|"
+                   r"that(?:'|\s)?s\s+(?:all|it)|that\s+will\s+be\s+all|stop\s+listening)$")
+_QUESTION = re.compile(r"^(?:how|what|when|why|where|who|which|whose|should|shall|do|does|did|is|are|am|was|were|have|has|"
+                       r"can\s+i|could\s+i|may\s+i|will\s+i|would\s+i)\b")
+_POLITE = re.compile(r"^(?:can|could|will|would)\s+you\b")
+FAST_MAX_WORDS = 5
 
 
 def _word_forms(text: str) -> list[str]:
@@ -68,31 +70,42 @@ def _normal_words(text: str) -> str:
     return _word_forms(text)[-1]
 
 
+def _is_question(text: str) -> bool:
+    """'how do I go to sleep', 'what time should I sleep', 'should I sleep now?': about sleep, not a command to Vex."""
+    forms = _word_forms(text)
+    first = next((f for f in forms if not re.match(r"^(?:okay|ok|hey|vex|hey\s+vex|so|well|and|now)\b", f)), forms[-1])
+    if _QUESTION.match(first):
+        return True
+    return (text or "").strip().endswith("?") and not _POLITE.match(first)
+
+
 def done_intent(text: str) -> str | None:
-    """'sleep' for sleep / goodbye / that's all / stop listening / dock ...; 'thanks' for a bare thank-you; None otherwise.
-    Either way Vex gives a short reply and goes straight back to wake-word-only + the pill: never a follow-up window.
-    The least-trimmed form that matches decides ("no thanks" is a no, not a thank-you)."""
+    """The fast path: 'sleep' for a short, clear command (go to sleep / your dock|doc / that's all / good night / goodbye / stop
+    listening, with optional 'okay Vex', 'you can', 'now'...). None for anything else, and never for a question about sleep: those
+    go to the brain, which can call the go_to_sleep tool for any other phrasing. Either way the result is the same: a short reply,
+    the pill, wake word only, never a follow-up window."""
+    if _is_question(text):
+        return None
     for t in _word_forms(text):
-        if t and _DONE.match(t):
-            return "thanks" if _THANKS.match(t) else "sleep"
+        if t and len(t.split()) <= FAST_MAX_WORDS and _DONE.match(t):
+            return "sleep"
     return None
+
+
+def _sleep_tool():
+    """tools.assistant (the go_to_sleep flag), or None where tools aren't loaded."""
+    try:
+        from tools import assistant
+
+        return assistant
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def is_sleep(text: str) -> bool:
     """True for 'sleep', 'go to sleep', 'you can go to sleep now', 'dock', 'that's all', 'goodbye', 'stop listening', ...:
     the orb shrinks back into the edge pill."""
     return done_intent(text) is not None
-
-
-_FOLLOWUP_END = re.compile(
-    r"^(?:(?:ok(?:ay)?|no|nope)\s+)?(?:that(?:'|\s)?s\s+(?:all|it|everything)(?:\s+for\s+now)?|thanks?(?:\s+you)?(?:\s+(?:so\s+much|a\s+lot))?|"
-    r"thank\s+you(?:\s+(?:so\s+much|a\s+lot))?|stop\s+listening|nothing(?:\s+else)?|never\s*mind|i'?m\s+(?:good|done)|"
-    r"no\s+thanks?|that\s+will\s+be\s+all|we'?re\s+done)(?:\s+(?:vex|please))*$")
-
-
-def is_followup_end(text: str) -> bool:
-    """'that's all', 'thanks Vex', 'stop listening', 'go to sleep', ...: the same "we're done" intent as is_sleep."""
-    return done_intent(text) is not None or bool(_FOLLOWUP_END.match(_normal_words(text)))
 
 
 def is_read_rest(text: str) -> bool:
@@ -428,7 +441,7 @@ class VexController:
                 self._sleep_after = True
                 self.frontend.show_caption("")
                 self._set_state(SPEAKING)
-                self.speaker.speak("You're welcome." if intent == "thanks" else "Okay.", self.frontend.set_level)
+                self.speaker.speak("Okay.", self.frontend.set_level)
                 return
             text = text.strip()
             timeline.mark("text_ready")
@@ -437,8 +450,20 @@ class VexController:
                 outcome = "read_rest"
                 return
             self._set_state(THINKING)
+            sleep_tool = _sleep_tool()
+            if sleep_tool is not None:
+                sleep_tool.clear_sleep_request()
             reply = self.agent.run(text)
             timeline.mark("brain_end")
+            if sleep_tool is not None and sleep_tool.take_sleep_request() and not self._barge_in:
+                outcome = "sleep"                                    # the brain called go_to_sleep: same ending as the fast path
+                log.info("go_to_sleep called by the brain for %r: short reply, then wake-word only", text)
+                self._sleep_after = True
+                short = reply.strip() if reply and len(reply.strip()) <= 40 else "Okay."
+                self.frontend.show_caption("")
+                self._set_state(SPEAKING)
+                self.speaker.speak(short, self.frontend.set_level)
+                return
             outcome = "interrupted"
             if self._barge_in:                                   # interrupted while thinking: skip speaking
                 log.info("tts skipped: interrupted while thinking")

@@ -10,7 +10,7 @@ from test_ui_core import FakeAgent, FakeCapture, FakeSpeaker
 from test_ui_qt import qapp  # noqa: F401 - the shared QApplication fixture
 from test_voice_recorder import AmplitudeVad, FakeStream
 
-from ui.controller import FOLLOWUP, IDLE, LISTENING, VexController, is_followup_end
+from ui.controller import FOLLOWUP, IDLE, LISTENING, VexController
 from ui.frontend import RecordingFrontend
 from voice.timeline import Timeline
 
@@ -127,8 +127,7 @@ def test_the_speakers_own_guard_counts_towards_the_delay():
     assert slept == [] and len(cap.windows) == 1
 
 
-@pytest.mark.parametrize("phrase,short", [("That's all.", "Okay."), ("Thanks Vex!", "You're welcome."), ("Stop listening.", "Okay."),
-                                          ("thank you", "You're welcome."), ("no thanks", "Okay."), ("nothing else", "Okay."),
+@pytest.mark.parametrize("phrase,short", [("That's all.", "Okay."), ("Stop listening.", "Okay."), ("Goodbye Vex.", "Okay."),
                                           ("No, go to sleep.", "Okay."), ("You can go to sleep now.", "Okay."), ("Go to your doc.", "Okay.")])
 def test_ending_phrases_get_a_short_reply_close_the_window_and_park_the_orb(phrase, short):
     c, cap, sp, fe, states, ends = make("set a timer", followups=[phrase])
@@ -136,12 +135,6 @@ def test_ending_phrases_get_a_short_reply_close_the_window_and_park_the_orb(phra
     assert c.wait_idle()
     assert c.agent.heard == ["set a timer"] and sp.spoken == ["reply to set a timer", short]      # no LLM call, just the short reply
     assert ("hide", None) in fe.calls and len(cap.windows) == 1 and c.state == IDLE
-
-
-def test_end_phrase_detection_is_not_fooled_by_real_requests():
-    assert is_followup_end("thanks vex") and is_followup_end("Okay, that's it.") and is_followup_end("I'm done")
-    assert not is_followup_end("thanks for the weather, now play music") and not is_followup_end("what's all this?")
-    assert not is_followup_end("stop the music")
 
 
 # ---- when the window must NOT open ------------------------------------------------------------------------------------------------------

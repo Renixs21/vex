@@ -143,10 +143,14 @@ Why this was needed: after a reply only the wake-word scorer was re-armed (`on_i
 0.6 s settle), the recorder itself only opens inside a turn, so anything said without "Hey Vex" was scored for the wake phrase and dropped.
 
 ## Sleep, goodbye, and a bare "Hey Vex"
-* **"We're done" intents** (any turn, inside or outside the follow-up window): "go to sleep", "you can go to sleep now", "no, go to sleep",
-  "go to your dock", "goodbye", "good night", "that's all", "stop listening", "nothing else", "never mind", even after leading
-  "stop, stop…" / "okay" / "no". Vex says a short "Okay." ("You're welcome." for a bare thank-you), parks the orb as the pill and goes
-  straight back to wake-word-only. **Never a follow-up window after these.** No language model call.
+* **Going to sleep** has two paths with the same ending (a short reply, the orb parks as the pill, wake word only, never a follow-up
+  window):
+  * **Fast path, no language model:** a short, clear command (5 words or fewer once "okay Vex", "you can", "no", "stop, stop", "now",
+    "please" are peeled off): "go to sleep", "go back to sleep", "sleep", "go to your dock" (or Whisper's "doc"), "that's all",
+    "that's it", "good night", "goodbye", "stop listening". Never a question: "how do I go to sleep?", "what time should I sleep?",
+    "should I sleep now?" go to the brain and get an answer. "Can you go to sleep?" is a polite command and does count.
+  * **The `go_to_sleep` tool (green, always offered):** for every other phrasing ("I'm heading to bed, you can rest too", "okay we're
+    finished here") the brain calls it and replies in a word or two; a reply longer than 40 characters is spoken as "Okay.".
 * **A bare "Hey Vex"** (nothing after it, or only the wake phrase again, also inside a follow-up window): Vex says
   `[voice] wake_greeting` ("What can I do for you?") and then listens for the command (the follow-up window). After the wake word Vex waits
   `wake_wait_s` (3 s) for the command to start before greeting. The orb's own caption "What can I do for you today?" was only ever

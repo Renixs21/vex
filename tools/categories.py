@@ -14,7 +14,7 @@ import re
 
 from tools import registry
 
-CORE = ("open_app", "open_url", "play_youtube", "web_search", "quick_facts", "recall", "remember", "more_tools")
+CORE = ("open_app", "open_url", "play_youtube", "web_search", "quick_facts", "recall", "remember", "more_tools", "go_to_sleep")
 
 CATEGORIES: dict[str, dict] = {
     "files": {
