@@ -39,6 +39,13 @@ orb_autosleep = 20                   # seconds idle before the orb returns to th
 orb_port = 47474                     # Vex -> orb (UDP, localhost)
 orb_click_port = 47475               # orb -> Vex: clicking the orb starts listening
 
+[memory]
+curator = true                       # after a conversation, save durable facts from it (memory/curator.py); audit: logs/curator.jsonl
+curator_idle_seconds = 120           # a conversation is over after this much quiet
+curator_order = ["groq-small", "groq", "gemini"]   # cheap model first, so live replies keep their rate limit
+curator_min_words = 6                # shorter conversations are skipped without an LLM call
+curator_max_attempts = 6             # failed/rate-limited conversations are retried later, then dropped (and logged)
+
 [wakeword]
 enabled = true                       # tray toggle too; every value here is validated, a bad one falls back to its default
 model_path = "models/hey_vex.onnx"   # your trained model (docs/WAKEWORD.md); until it exists the fallback below is used

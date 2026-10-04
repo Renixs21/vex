@@ -138,10 +138,70 @@ class Memory:
         ents = self.index.find_entities(fact, fuzzy=False, stopwords=STOPWORDS)
         if ents and ents[0][2] >= 1.0:
             return self.vault.root / self.index.note(ents[0][0])["path"]
+        return self._inbox_path()
+
+    def _inbox_path(self) -> Path:
         inbox = self.vault.root / "inbox" / f"{today()}.md"
         if not inbox.exists():
-            self.vault.create("inbox", today()).path
+            self.vault.create("inbox", today())
         return inbox
+
+    def add_to_inbox(self, text: str, source: str = "curator") -> Result:
+        """Park an uncertain fact in today's inbox note, waiting for the user's approval. Refuses secrets."""
+        text = " ".join(text.split())
+        if not text:
+            return Result(False, "Nothing to save.")
+        if kinds := find_secrets(text):
+            return Result(False, f"Not saving that: it looks like a secret ({', '.join(kinds)}).")
+        try:
+            path = self._inbox_path()
+            outcome: dict[str, str] = {}
+
+            def apply(note: Note) -> None:
+                outcome["block_id"] = Vault.add_fact(note, text, source)
+
+            self.vault.mutate(path, apply)
+            self.index.sync()
+        except (OSError, ValueError) as e:
+            log.exception("inbox write failed")
+            return Result(False, f"Couldn't save that: {e}")
+        return Result(True, "Saved to the inbox for approval.", {"path": self.vault.rel(path), **outcome})
+
+    def add_daily_entry(self, text: str, source: str = "curator") -> Result:
+        """Append a conversation summary to today's daily note (created if missing)."""
+        text = " ".join(text.split())
+        if not text or find_secrets(text):
+            return Result(False, "Nothing to add.")
+        path = self.vault.root / "daily" / f"{today()}.md"
+        if not path.exists():
+            self.vault.create("daily", today())
+        self.vault.mutate(path, lambda note: Vault.add_fact(note, text, source))
+        self.index.sync()
+        return Result(True, "Added to today's daily note.", {"path": self.vault.rel(path)})
+
+    def update_block(self, note_title: str, block_id: str, text: str, source: str) -> Result:
+        """Replace one fact (by block id) in a note; the old value goes into the provenance comment."""
+        self.index.sync()
+        row = self.index.resolve(note_title)
+        if not row:
+            return Result(False, f"No note called '{note_title}'.")
+        if find_secrets(text):
+            return Result(False, "Not saving that: it looks like a secret.")
+        path = self.vault.root / row["path"]
+        outcome: dict[str, bool] = {}
+
+        def apply(note: Note) -> None:
+            old = next((b.text for b in note.parsed().blocks if b.block_id == block_id), None)
+            if old is None:
+                outcome["ok"] = False
+                return
+            outcome["ok"] = Vault.update_fact(note, block_id, self._autolink(" ".join(text.split()), note), source,
+                                              was=_previous_value(old, text))
+
+        self.vault.mutate(path, apply)
+        self.index.sync()
+        return Result(bool(outcome.get("ok")), "Updated." if outcome.get("ok") else "That fact no longer exists.",
+                      {"note": row["title"], "block_id": block_id})
 
     def _singleton(self, type_: str) -> Path:
         rows = self.index.list_notes(type_)

@@ -40,6 +40,13 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "orb_mode": "dock", "orb_edge": "right", "orb_edge_y": 0.40, "orb_center_y": 0.50, "orb_radius": 62.0,
         "orb_port": 47474, "orb_click_port": 47475,
     },
+    "memory": {
+        "curator": True,                 # after a conversation, save durable facts from it (see memory/curator.py)
+        "curator_idle_seconds": 120,     # a conversation is over after this much quiet
+        "curator_order": ["groq-small", "groq", "gemini"],   # cheap model first: it must not use up what live replies need
+        "curator_min_words": 6,          # conversations with fewer user words in total are skipped without an LLM call
+        "curator_max_attempts": 6,       # then the conversation is dropped (and logged)
+    },
     "wakeword": {"enabled": True, "model_path": "models/hey_vex.onnx", "fallback_model": "hey_jarvis", "threshold": 0.5,
                  "cooldown": 2.0, "vad_threshold": 0.5, "input_device": "", "chime": True},
     "voice": {

@@ -112,6 +112,32 @@ def startup_summary(parts: dict, hotkey_text: str, console: bool) -> list[str]:
     return lines
 
 
+def build_curator(controller):
+    """The memory curator (saves durable facts after a conversation), or None if it is off or can't start. Never raises."""
+    import config
+
+    cfg = config.settings["memory"]
+    if not cfg["curator"]:
+        return None
+    try:
+        from brain.llm import build_client
+        from memory.curator import Curator
+        from tools import memory as memory_tools
+
+        cur = Curator(memory_tools.get_memory(), llm_factory=lambda: build_client(order=cfg["curator_order"]),
+                      idle_seconds=float(cfg["curator_idle_seconds"]), min_words=int(cfg["curator_min_words"]),
+                      max_attempts=int(cfg["curator_max_attempts"]), log_path=config.ROOT / config.settings["paths"]["logs"] / "curator.jsonl",
+                      is_busy=lambda: controller.state != "idle")
+        controller.on_turn.append(cur.add_turn)
+        controller.on_interaction_end.append(cur.interaction_ended)
+        cur.start()
+        log.info("memory curator on (conversation over after %s s idle; audit: logs/curator.jsonl)", cfg["curator_idle_seconds"])
+        return cur
+    except Exception:  # noqa: BLE001 - memory is a bonus; Vex must start without it
+        log.exception("memory curator could not start")
+        return None
+
+
 def run(on_ready=None, console: bool = False) -> int:
     """Start the app. `on_ready(parts: dict)` (optional) is called once everything is built, before the event loop starts."""
     import signal
@@ -172,8 +198,11 @@ def run(on_ready=None, console: bool = False) -> int:
     controller = VexController(agent, frontend, stack.speaker if stack else SimulatedSpeaker(),
                                stack.capture if stack else typed, typed_capture=typed)
     holder["controller"] = controller
+    curator = build_curator(controller)
 
     def cleanup() -> None:
+        if curator is not None:
+            curator.stop()
         if wake is not None:
             wake.stop()
         hotkey.stop()

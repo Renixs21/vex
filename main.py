@@ -24,6 +24,21 @@ def run_text() -> int:
     except RuntimeError as e:
         print(e)
         return 1
+    curator = None
+    if config.settings["memory"]["curator"]:
+        try:
+            from brain.llm import build_client
+            from memory.curator import Curator
+            from tools import memory as memory_tools
+
+            mcfg = config.settings["memory"]
+            curator = Curator(memory_tools.get_memory(), llm_factory=lambda: build_client(order=mcfg["curator_order"]),
+                              idle_seconds=float(mcfg["curator_idle_seconds"]), min_words=int(mcfg["curator_min_words"]),
+                              max_attempts=int(mcfg["curator_max_attempts"]),
+                              log_path=config.ROOT / config.settings["paths"]["logs"] / "curator.jsonl")
+            curator.start()
+        except Exception as e:  # noqa: BLE001 - memory is a bonus
+            print("(memory curator is off:", e, ")")
     print("Vex (text mode). Type 'exit' to quit." + ("  [DRY RUN: nothing will be changed]" if config.dry_run() else ""))
     while True:
         try:
@@ -32,11 +47,16 @@ def run_text() -> int:
             print()
             return 0
         if line.lower() in ("exit", "quit"):
+            if curator is not None:
+                curator.stop()               # an open conversation stays queued and is processed next time
             return 0
         if not line:
             continue
         try:
-            print("vex>", agent.run(line))
+            reply = agent.run(line)
+            print("vex>", reply)
+            if curator is not None:
+                curator.add_turn(line, reply)
         except Exception as e:  # noqa: BLE001
             print("vex> Something went wrong:", e)
 

@@ -74,6 +74,7 @@ class VexController:
         self._sleep_after = False
         self.on_interaction_start: list[Callable[[], None]] = []
         self.on_interaction_end: list[Callable[[], None]] = []
+        self.on_turn: list[Callable[[str, str], None]] = []       # (what you said, Vex's reply) after each answered turn
         self.listeners: list[Callable[[str], None]] = []       # called with the new state on every change
         self.on_wakeword_toggle: list[Callable[[bool], None]] = []   # the tray's Wake word switch (listener comes later)
         self._lock = threading.RLock()
@@ -221,6 +222,11 @@ class VexController:
             if self._barge_in:                                   # interrupted while thinking: skip speaking
                 return
             self.last_reply = reply
+            for cb in list(self.on_turn):                        # e.g. the memory curator: cheap, must never break the turn
+                try:
+                    cb(text, reply)
+                except Exception:  # noqa: BLE001
+                    log.exception("turn listener failed")
             self._set_state(SPEAKING)
             self.frontend.show_caption(reply)
             self.speaker.speak(reply, self.frontend.set_level)

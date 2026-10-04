@@ -387,8 +387,8 @@ def _short(e: BaseException) -> str:
     return f"HTTP {code}" if code else f"{type(e).__name__}"
 
 
-def build_client() -> FallbackClient:
-    """Providers in the order given by [llm] order, using whichever keys are configured."""
+def build_client(order: list[str] | None = None) -> FallbackClient:
+    """Providers in the order given by [llm] order (or `order`), using whichever keys are configured."""
     cfg = settings["llm"]
     specs = {
         "gemini": (GeminiClient, "GEMINI_API_KEY", "gemini_model", "gemini_rpm"),
@@ -396,7 +396,7 @@ def build_client() -> FallbackClient:
         "groq-small": (GroqClient, "GROQ_API_KEY", "groq_small_model", "groq_rpm"),       # separate model = separate limits
     }
     wanted = []
-    for name in cfg["order"]:
+    for name in (order or cfg["order"]):
         if name not in specs:
             log.warning("[llm] order lists unknown provider %r; ignoring it", name)
             continue
