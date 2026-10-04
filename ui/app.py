@@ -392,6 +392,9 @@ def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: in
     controller = VexController(agent, frontend, stack.speaker if stack else SimulatedSpeaker(),
                                stack.capture if stack else typed, typed_capture=typed)
     holder["controller"] = controller
+    from brain import usage as llm_usage
+
+    llm_usage.set_recorder(llm_usage.LlmUsage(config.ROOT / "data" / "llm_usage.json"))      # counts only, for the Budget screen
     controller.followup_enabled = bool(voice_cfg.get("followup_enabled", True))
     controller.followup_seconds = float(voice_cfg.get("followup_s", 8))
     controller.followup_min_speech_ms = int(voice_cfg.get("followup_min_speech_ms", 250))

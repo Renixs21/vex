@@ -51,6 +51,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "budget_inr": 1000,              # the most you're willing to spend (Google asked for a 1000 rupee prepayment for Cloud TTS)
         "google_tts_usd_per_million_chars": 30.0,   # Chirp 3 HD list price past the free allowance
         "usd_to_inr": 88.0,
+        "groq_daily_tokens": 200000,     # Groq's free tier: tokens per model per day (shown on the Budget screen)
     },
     "web": {
         "weather_place": "",             # default city for "what's the weather" (blank: Vex asks which city)

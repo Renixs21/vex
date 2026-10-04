@@ -86,7 +86,7 @@ class ApiCore:
             "reminders.add": self.reminders_add, "reminders.cancel": self.reminders_cancel,
             "voice.get": self.voice_get, "voice.set": self.voice_set, "voice.levels": self.voice_levels, "voice.preview": self.voice_preview,
             "latency.turns": self.latency_turns,
-            "system.info": self.system_info, "system.restart": self.system_restart,
+            "system.info": self.system_info, "system.restart": self.system_restart, "budget.models": self.budget_models,
             "logs.list": self.logs_list, "logs.tail": self.logs_tail, "logs.open": self.logs_open,
         }
 
@@ -696,6 +696,26 @@ class ApiCore:
             raise ApiError("couldn't remove the startup entry")
         self._add_activity("autostart", on=bool(args["on"]))
         return self.autostart_get({})
+
+    def budget_models(self, args: dict) -> dict:
+        """Per model: today's requests and tokens, tokens per day for the last week, and the free daily limit where one is known
+        (Groq: 200K tokens per model per day). Every model Vex uses is a free tier: spend is 0."""
+        from brain import usage as llm_usage
+        from config import settings
+
+        rec = llm_usage._recorder                      # noqa: SLF001 - the app's one usage store
+        if rec is None:
+            from brain.usage import LlmUsage
+
+            rec = LlmUsage(self.data / "llm_usage.json")
+        s = rec.summary(max(1, min(30, int(args.get("days", 7)))))
+        limit = int(self.budget_cfg.get("groq_daily_tokens", 200_000))
+        order = list(settings.get("llm", {}).get("order", []))
+        for m in s["models"]:
+            m["daily_limit"] = limit if m["provider"].startswith("groq") else None
+            m["spend_inr"] = 0.0
+        s["models"].sort(key=lambda m: (order.index(m["provider"]) if m["provider"] in order else 99, m["provider"]))
+        return s
 
     def budget(self, args: dict) -> dict:
         """Money: everything Vex uses is free except Google Cloud TTS (off by default). Characters past the free allowance x price."""

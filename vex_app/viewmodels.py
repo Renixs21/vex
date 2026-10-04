@@ -1099,3 +1099,83 @@ class SystemModel(QObject):
     logName = Property(str, lambda self: self._logName, notify=logChanged)
     logText = Property(str, lambda self: "\n".join(self._logLines), notify=logChanged)
     restarting = Property(bool, lambda self: self._restartAt is not None, notify=changed)
+
+
+def _compact(n: float) -> str:
+    n = float(n or 0)
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 10_000:
+        return f"{n / 1000:.0f}K"
+    if n >= 1000:
+        return f"{n / 1000:.1f}K"
+    return f"{n:.0f}"
+
+
+class BudgetModel(QObject):
+    """Budget: rupees spent against the 1000 rupee budget (only Google Cloud TTS can cost money, and it is off by default), every
+    model's use (requests, tokens, last 7 days) and Groq's 200K-tokens-a-day free limit per model."""
+
+    changed = Signal()
+
+    def __init__(self, client: ApiClient, parent=None):
+        super().__init__(parent)
+        self.client = client
+        self._budget: dict = {}
+        self._models: dict = {}
+        self._timer = QTimer(self)
+        self._timer.setInterval(60_000)
+        self._timer.timeout.connect(self.refresh)
+        client.connectedChanged.connect(lambda: client.connected and self.refresh())
+
+    @Slot()
+    def refresh(self) -> None:
+        if not self.client.connected:
+            return
+        self.client.call("budget", {}, lambda ok, d, e: ok and self._set("_budget", d or {}))
+        self.client.call("budget.models", {"days": 7}, lambda ok, d, e: ok and self._set("_models", d or {}))
+
+    @Slot(bool)
+    def setLive(self, on: bool) -> None:
+        (self._timer.start if on else self._timer.stop)()
+
+    def _set(self, attr: str, value) -> None:
+        setattr(self, attr, value)
+        self.changed.emit()
+
+    def _money(self) -> dict:
+        b = self._budget or {}
+        total = float(b.get("budget_inr") or 1000)
+        used = float(b.get("used_inr") or 0)
+        return {"used": used, "total": total, "left": float(b.get("left_inr", total - used)), "fraction": max(0.0, min(1.0, used / total)),
+                "note": b.get("note", ""), "googleOn": bool(b.get("google_tts_on")), "googleChars": int(b.get("google_chars_this_month") or 0),
+                "googleFree": int(b.get("google_free_chars") or 0),
+                "googleText": f"{_compact(b.get('google_chars_this_month') or 0)} / {_compact(b.get('google_free_chars') or 0)}"}
+
+    def _rows(self) -> list:
+        days = (self._models or {}).get("days", [])
+        models = (self._models or {}).get("models", [])
+        peak = max([1] + [t for m in models for t in m.get("totals", [])])
+        out = []
+        for m in models:
+            today = m.get("today", {})
+            limit = m.get("daily_limit")
+            used = int(today.get("tokens", 0))
+            frac = (used / limit) if limit else 0.0
+            level = "" if not limit else ("limit reached: Vex uses the next model" if frac >= 1 else "near today's limit" if frac >= 0.8 else "")
+            labels = []
+            for d in days:
+                try:
+                    labels.append(datetime.fromisoformat(d).strftime("%a %d"))
+                except ValueError:
+                    labels.append(d)
+            out.append({"provider": m.get("provider", ""), "model": m.get("model", ""), "requests": int(today.get("requests", 0)),
+                        "tokens": used, "tokensText": _compact(used), "limit": limit or 0, "limitText": _compact(limit) if limit else "",
+                        "fraction": min(1.0, frac), "level": level, "severity": "red" if frac >= 1 else ("yellow" if frac >= 0.8 else ""),
+                        "week": [{"day": lab, "tokens": t, "text": _compact(t), "h": t / peak} for lab, t in zip(labels, m.get("totals", []))],
+                        "weekTotal": _compact(sum(m.get("totals", []))), "spend": "₹0 · free tier"})
+        return out
+
+    money = Property("QVariantMap", _money, notify=changed)
+    rows = Property("QVariantList", _rows, notify=changed)
+    groqRows = Property("QVariantList", lambda self: [r for r in self._rows() if r["limit"]], notify=changed)

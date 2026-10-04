@@ -50,6 +50,7 @@ keep_conversations_days = 14         # conversation history for the Control Cent
 budget_inr = 1000                    # what you're willing to spend: only Google Cloud TTS (off by default) can cost money
 google_tts_usd_per_million_chars = 30.0
 usd_to_inr = 88.0
+groq_daily_tokens = 200000           # Groq free tier: tokens per model per day (Budget screen)
 
 [web]
 weather_place = ""                   # default city for "what's the weather"; blank = Vex asks

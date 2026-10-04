@@ -401,6 +401,9 @@ class FallbackClient:
                                    "tools": len(tools), "seconds": self._clock() - t0})
                 timeline.llm(c.name, self._clock() - t0, len(tools), u.get("prompt"))
                 self.last_answer = (c.name, why)
+                from brain import usage as _usage
+
+                _usage.record(c.name, getattr(c, "model", ""), u.get("prompt"), u.get("completion"))
                 timeline.set(llm_answered_by=c.name, llm_why=why)
                 log.info("LLM answered by %s (%s)", c.name, why)
                 return resp

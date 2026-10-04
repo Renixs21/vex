@@ -11,7 +11,7 @@ Window {
     minimumHeight: 640
     visible: true
     color: Theme.base
-    title: "Vex Control Center"
+    title: "Vex Control Center · " + (titles[current] || "")
 
     property string current: startScreen
     readonly property bool compact: width < 1100
@@ -45,7 +45,7 @@ Window {
                            : win.current === "conversations" ? conversationsComp
                            : win.current === "tasks" ? tasksComp
                            : win.current === "voice" ? voiceComp
-                           : win.current === "system" ? systemComp : placeholderComp
+                           : win.current === "system" ? systemComp : budgetComp
             opacity: 0
             onLoaded: { opacity = 0; slide.restart() }
             transform: Translate { id: shift; x: 0 }
@@ -65,7 +65,7 @@ Window {
     Component { id: tasksComp; Tasks {} }
     Component { id: voiceComp; Voice {} }
     Component { id: systemComp; System {} }
-    Component { id: placeholderComp; Placeholder { title: win.titles[win.current] || "" } }
+    Component { id: budgetComp; Budget {} }
 
     // a short message at the bottom (e.g. "Starting Vex...")
     Panel {

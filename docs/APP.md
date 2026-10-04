@@ -22,7 +22,7 @@ window says so, offers **Start Vex** (starts the supervisor quietly), and reconn
 | Tasks & reminders | built |
 | Voice | built |
 | System & health | built |
-| Budget | next |
+| Budget | built |
 
 ### Home
 * **Header:** a status chip ("Listening for 'Hey Vex'", "Still listening", "Microphone muted"...), the follow-up window length, and
@@ -99,6 +99,16 @@ anything is stored. Older sessions are dropped when Vex starts and once a day. B
   "restarted" toast. Started by hand, the Control Center starts it again itself if it isn't back after 12 s.
 * **Logs:** the last 400 lines of `vex.log`, `supervisor.log`, `housekeeping.log`, the error output and the last health report, with keys
   and secrets hidden; **Open logs folder**.
+
+### Budget
+* **Spent this month** (the one big number): rupees against `[budget] budget_inr` (1000). Everything Vex uses is a free tier; only
+  Google Cloud TTS can cost money, and it is off by default (its free characters this month are shown).
+* **Groq tokens today:** each Groq model against its free 200K tokens a day (`[budget] groq_daily_tokens`). From 80% the meter turns
+  yellow and says "near today's limit"; at 100%, red, "limit reached: Vex uses the next model".
+* **Every model:** requests and tokens today, the last 7 days as small columns on one shared scale (hover a day for its count), and
+  spend (0, free tier). Counted from this version on in `data\llm_usage.json`: requests and token counts per model per day, nothing
+  else (no prompts, no replies), 40 days kept. Background work (the memory curator, the nightly tidy-up) counts too: it spends the same
+  daily allowance.
 
 ## Look
 Base `#0b0c0e`. Panels: brushed gunmetal (`shaders/panel.frag`: gradient `#1b1d21`->`#141619`, very faint vertical brush lines, 1px

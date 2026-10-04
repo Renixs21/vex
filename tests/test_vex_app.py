@@ -14,7 +14,7 @@ pytest.importorskip("pytestqt")
 from ui.api_core import ApiCore                                     # noqa: E402 - the test side may use Vex; the app may not
 from ui.api_server import ApiServer                                  # noqa: E402
 from vex_app.client import ApiClient                                 # noqa: E402
-from vex_app.viewmodels import (ConversationsModel, HomeModel, MemoryModel, StatusModel, TasksModel, ToolsModel,  # noqa: E402
+from vex_app.viewmodels import (BudgetModel, ConversationsModel, HomeModel, MemoryModel, StatusModel, TasksModel, ToolsModel,  # noqa: E402
                                 SystemModel, VoiceModel)
 
 TOKEN = "z" * 43
@@ -217,6 +217,7 @@ def test_the_qml_loads_without_errors_connected_and_offline(qtbot, server):
         ctx.setContextProperty("tasksModel", TasksModel(client))
         ctx.setContextProperty("voiceModel", VoiceModel(client))
         ctx.setContextProperty("systemModel", SystemModel(client))
+        ctx.setContextProperty("budgetModel", BudgetModel(client))
         ctx.setContextProperty("appPaths", {"icons": QUrl.fromLocalFile(str(paths.ICONS) + "/").toString(),
                                             "shaders": QUrl.fromLocalFile(str(paths.SHADERS) + "/").toString(),
                                             "web": QUrl.fromLocalFile(str(paths.WEB) + "/").toString()})
@@ -625,3 +626,37 @@ def test_after_a_restart_the_app_starts_vex_itself_if_nothing_brought_it_back(qt
     t[0] = 13.0
     m._check_back()
     assert started == [1] and not m.restarting
+
+
+# ---- the budget model --------------------------------------------------------------------------------------------------------------------
+def test_budget_model_shows_money_limits_and_the_week(qtbot, tmp_path):
+    from brain.usage import LlmUsage
+
+    rec = LlmUsage(tmp_path / "llm_usage.json")
+    rec.record("groq", "openai/gpt-oss-120b", 165_000, 2_000)
+    rec.record("groq-small", "openai/gpt-oss-20b", 20_000, 500)
+    rec.record("gemini", "gemini-flash", 900, 10)
+    c, *_ = make()
+    core = ApiCore(controller=c, logs=tmp_path, data=tmp_path)
+    srv = ApiServer(core, TOKEN, port=0)
+    assert srv.start()
+    try:
+        client = connect(qtbot, srv.bound_port)
+        m = BudgetModel(client)
+        qtbot.waitUntil(lambda: bool(m.rows) and m.money["total"] == 1000, timeout=8000)
+        assert m.money["used"] == 0 and m.money["googleText"] == "0 / 1.0M"
+        groq = {r["provider"]: r for r in m.groqRows}
+        assert set(groq) == {"groq", "groq-small"}                               # gemini has no daily token limit to show
+        assert groq["groq"]["tokensText"] == "167K" and groq["groq"]["severity"] == "yellow" and groq["groq"]["level"] == "near today's limit"
+        assert groq["groq-small"]["severity"] == "" and groq["groq-small"]["level"] == ""
+        week = groq["groq"]["week"]
+        assert len(week) == 7 and week[-1]["h"] == 1.0 and all(r["spend"].startswith("₹0") for r in m.rows)
+        client.stop()
+    finally:
+        srv.stop()
+
+
+def test_compact_numbers():
+    from vex_app.viewmodels import _compact
+
+    assert [_compact(n) for n in (0, 950, 1500, 55_100, 167_200, 1_000_000)] == ["0", "950", "1.5K", "55K", "167K", "1.0M"]
