@@ -30,7 +30,7 @@ Until you train your own model (below) Vex uses the built-in **"Hey Jarvis"** mo
 | `enabled` | `true` | also the tray switch "Wake word" (saved here) |
 | `model_path` | `models/hey_vex.onnx` | your trained model |
 | `fallback_model` | `hey_jarvis` | used while `model_path` doesn't exist |
-| `threshold` | `0.5` | 0.05-0.99. Raise to 0.6-0.7 if it wakes by accident, lower if it misses you |
+| `threshold` | `0.5` (0.3 with the first trained model) | 0.05-0.99. Raise to 0.6-0.7 if it wakes by accident, lower if it misses you |
 | `cooldown` | `2.0` | seconds between wakes |
 | `vad_threshold` | `0.5` | openWakeWord's own speech gate (0 = off) |
 | `input_device` | `""` | blank = the `[voice]` microphone / Windows default |
@@ -49,18 +49,29 @@ python tools_dev/wakeword_tune.py --say 10 --quiet 5 --write    # then offers to
 `--device "Realtek"` (or an index) picks a microphone. The suggestion is the midpoint between your quietest real wake and the loudest
 false one; if they overlap it favours fewer false wakes and tells you so.
 
-## Train your own "Hey Vex" (in Google Colab, free)
-You train it; Vex doesn't.
-1. Open the **automatic model training** notebook linked from the openWakeWord README
-   (https://github.com/dscripka/openWakeWord, section "Training New Models"; the link changes, so take it from there).
-2. Runtime > Change runtime type > a free **GPU**.
-3. Set the target phrase to **`hey vex`**. Always train the full phrase, never just "vex": short wake words trigger falsely far more
-   often. Leave the other settings at their defaults first; if you get false wakes later, train again with more steps / more negative
-   data (the notebook explains the knobs).
-4. Run all cells (it generates synthetic speech, so it takes a while). Download the resulting `.onnx`.
-5. Rename it `hey_vex.onnx` and put it in `models/` (this folder is git-ignored: `*.onnx`).
-6. Restart Vex. The tray should now say `Wake word: Hey Vex`.
-7. Run `wakeword_tune.py --say 10 --quiet 5` and set the threshold it suggests.
+## How the "Hey Vex" model was trained (locally, no Colab)
+Trained on this PC (CPU only) with [livekit-wakeword](https://github.com/livekit/livekit-wakeword) 0.3.0 (Apache-2.0; same mel and
+embedding front end as openWakeWord, so its ONNX head loads in openWakeWord's `Model`). The negative-feature set (ACAV100M) makes the
+model non-commercial; fine for personal use. Work folder: `C:\Users\<you>\wakeword_train\` (outside the repo); only `models/hey_vex.onnx`
+is used by Vex. The scripts are in `tools_dev/wakeword_train/`.
+
+1. `python -m venv lk`, `pip install "livekit-wakeword[train,eval,export]"`, `winget install eSpeak-NG.eSpeak-NG` (needed on PATH).
+2. `hey_vex.yaml`: `target_phrases: ["hey vex"]`, 23 adversarial negatives ("vex", "hex", "hey alex", "hey tax", "hey jarvis"...),
+   `n_samples` 3000 (first pass) or 8000, `model_type: conv_attention`, `small`, `steps` 12000 or 30000.
+3. `livekit-wakeword setup` downloads 17 GB; instead `partial_acav.py 2.5` fetches only the first 2.5 GB of the 16 GB ACAV file with
+   parallel HTTP Range requests and writes a valid smaller .npy (then use the library's `_download_validation_features`, `_download_rirs`,
+   `_download_musan_noise` helpers for the rest).
+4. `livekit-wakeword generate hey_vex.yaml` (Piper TTS on CPU, about 1.5 clips/s).
+5. Your own voice: `python tools_dev/record_wakeword_clips.py --set train` (50+ "hey vex", 240+ negatives), then `mix_real.py`
+   copies them into `positive_train` / `negative_train` (positives trimmed and repeated 30x, negatives 8x). Record a separate `--set heldout`
+   for testing only; it is never trained on.
+6. `livekit-wakeword augment` (its feature step crashes in 0.3.0, so run `extract_run.py` afterwards), then `train_run.py hey_vex.yaml`
+   (about 12 steps/s on a 10-core CPU: the 14,400-step first pass took 18 minutes; it snapshots weights every 4 minutes), then
+   `livekit-wakeword export hey_vex.yaml` (set `PYTHONUTF8=1` on Windows).
+7. `eval_heldout.py output/hey_vex/hey_vex.onnx` scores your held-out clips through openWakeWord. Copy the .onnx to `models/hey_vex.onnx`.
+
+**First model (3000 samples, 12000 steps, 46 real positives):** held-out recall 46% at threshold 0.3 with 0 false wakes in 63 negative
+clips (54% at 0.2 with 4). Real data is what matters most: record more "hey vex" clips and retrain.
 
 ## Troubleshooting
 - **False wakes**: raise `threshold` to 0.6-0.7, raise `cooldown`, or retrain with more negative data. TV and music can do it; the
