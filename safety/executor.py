@@ -18,7 +18,7 @@ import time
 
 from config import ROOT, settings
 from memory.secrets import redact
-from safety import policy
+from safety import context, policy
 from safety.audit import AuditLog, _known_secret_values, scrub
 from safety.confirm import Confirmation, Confirmer, DenyAllConfirmer, TerminalConfirmer
 from safety.elevation import DOWNGRADE_NOTE, HINT, NEEDS_ELEVATION, ElevationPolicy
@@ -97,19 +97,30 @@ class Executor:
                                 extra={"would_confirm": [r.step for r in requests]})
 
         outcome = "auto"
+        via: dict[str, str] = {}                                   # which channel answered each confirmation step
         for req in requests:
             answer = self._ask(req)
+            via[req.step] = answer.channel
             if not answer.approved:
                 outcome = "timeout" if answer.reason == "timeout" else "denied"
                 msg = "Not done: the user didn't answer in time." if outcome == "timeout" else "Not done: the user declined."
-                return self._finish(tool, decision.tier, outcome, ToolResult(False, msg), args, reason=f"{req.step}: {answer.reason}")
+                alt = tool.on_decline(args) if (outcome == "denied" and tool.on_decline is not None) else None
+                if alt:                                            # a gentler alternative (e.g. save under a new name): own pipeline
+                    self._finish(tool, decision.tier, outcome, ToolResult(False, msg), args, reason=f"{req.step}: {answer.reason}",
+                                 extra={"via": dict(via), "alternative": True})
+                    return self.run(name, alt)
+                return self._finish(tool, decision.tier, outcome, ToolResult(False, msg), args, reason=f"{req.step}: {answer.reason}",
+                                    extra={"via": dict(via)})
             outcome = "approved"
 
         result = registry.execute(name, args)
+        context.mark_result(name, result.ok)                       # reading outside content taints the rest of the turn
         if name in ADMIN_TOOLS:
             result = self._elevation_followup(args, result, downgraded)
-        return self._finish(tool, decision.tier, outcome, result, args, started=t0,
-                            extra={"admin_downgraded": True} if downgraded else None)
+        extra: dict = {"via": dict(via)} if via else {}
+        if downgraded:
+            extra["admin_downgraded"] = True
+        return self._finish(tool, decision.tier, outcome, result, args, started=t0, extra=extra or None)
 
     def _elevation_followup(self, args: dict, result: ToolResult, downgraded: bool) -> ToolResult:
         """After a non-admin run that failed for lack of rights, tell the model to ask the user "Retry as administrator?"."""

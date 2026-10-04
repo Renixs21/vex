@@ -4,7 +4,9 @@ Hooks (all optional, all pure/read-only until the user has approved):
   prepare(args)  -> args   resolve things for display (absolute paths, winget package IDs...). May raise Refuse or
                            ShortCircuit.
   classify(args) -> Decision   raise the tier based on the arguments (e.g. a protected path).
-  describe(args) -> str    the exact text the user is asked to approve.
+  describe(args) -> str    the exact text the user is asked to approve (its first line is also what is read aloud).
+  on_decline(args) -> args|None   if the user explicitly says no, an alternative call to run instead (it goes through the
+                           whole safety pipeline again), e.g. "replace the file?" no -> save under a new name.
 The registry never executes anything on its own authority: all calls from the agent go through
 safety.executor.Executor, which owns tiers, confirmations, dry-run, audit and undo.
 """
@@ -63,6 +65,7 @@ class Tool:
     classify: Callable[[dict], Any] | None = field(default=None, repr=False)
     describe: Callable[[dict], str] | None = field(default=None, repr=False)
     audit_args: bool = True         # False: the audit log records no arguments (memory, clipboard)
+    on_decline: Callable[[dict], dict | None] | None = field(default=None, repr=False)   # args for a gentler alternative if the user says no
     category: str = "core"          # which tool group offers it to the LLM (see tools/categories.py)
 
 
@@ -70,7 +73,7 @@ _TOOLS: dict[str, Tool] = {}
 
 
 def tool(name: str, description: str, params: dict[str, dict], required: list[str] | None = None, tier: str = GREEN, *,
-         prepare=None, classify=None, describe=None, audit_args: bool = True):
+         prepare=None, classify=None, describe=None, audit_args: bool = True, on_decline=None):
     """Register `fn(**args) -> ToolResult`. `params` maps arg name -> JSON-schema property."""
     bad = RESERVED_ARGS & set(params)
     if bad:
@@ -80,7 +83,7 @@ def tool(name: str, description: str, params: dict[str, dict], required: list[st
     schema = {"type": "object", "properties": params, "required": required}
 
     def deco(fn: Callable[..., ToolResult]):
-        _TOOLS[name] = Tool(name, description, schema, tier, fn, prepare, classify, describe, audit_args)
+        _TOOLS[name] = Tool(name, description, schema, tier, fn, prepare, classify, describe, audit_args, on_decline=on_decline)
         return fn
 
     return deco

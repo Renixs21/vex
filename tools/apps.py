@@ -9,7 +9,8 @@ from pathlib import Path
 
 from rapidfuzz import fuzz, process
 
-from tools.registry import RED, YELLOW, Refuse, ToolResult, tool
+from safety.policy import Decision
+from tools.registry import GREEN, RED, YELLOW, Refuse, ToolResult, tool
 
 WINGET_ALREADY_INSTALLED = (-1978335189, 0x8A15002B)
 WINGET_NO_APPLICABLE = (-1978335188, 0x8A15002C)
@@ -54,9 +55,53 @@ def find_app(name: str, apps: dict[str, Path] | None = None) -> tuple[str, Path]
     return (hit[0], apps[hit[0]]) if hit else None
 
 
+def _snapshot_windows(name: str) -> None:
+    """Remember which windows exist before launching, so 'type into it' later goes to the new window, not an old one."""
+    try:
+        from safety import context
+        from tools import computer
+
+        context.note_launch(name, {w.hwnd for w in computer.backend().windows()})
+    except Exception:  # noqa: BLE001 - never let this bookkeeping stop an app from opening
+        pass
+
+
+# Command shells and admin/system tools: opening one is a different kind of action from opening Notepad, so it needs a yes.
+_DANGEROUS_APP_WORDS = (
+    "cmd", "command prompt", "powershell", "pwsh", "windows terminal", "terminal", "wt", "regedit", "registry editor", "reg",
+    "mmc", "msiexec", "mshta", "wscript", "cscript", "diskpart", "bcdedit", "format", "taskkill", "schtasks", "task scheduler",
+    "netsh", "wmic", "rundll32", "regsvr32", "certutil", "bitsadmin", "msconfig", "system configuration", "services",
+    "gpedit", "group policy", "secpol", "local security policy", "lusrmgr", "compmgmt", "computer management", "diskmgmt",
+    "disk management", "devmgmt", "device manager", "eventvwr", "event viewer", "wsl", "bash", "ssh", "telnet", "runas",
+    "psexec", "dism", "sfc", "chkdsk", "cipher", "takeown", "icacls", "bcdboot", "conhost", "powershell ise", "debug")
+_DANGEROUS_APP_RX = re.compile(r"(?<![\w])(?:" + "|".join(re.escape(w) for w in sorted(_DANGEROUS_APP_WORDS, key=len, reverse=True)) + r")(?![\w])", re.I)
+
+
+def is_dangerous_app(*names: str | None) -> bool:
+    """True if the app asked for, or the Start Menu entry it resolves to, is a shell or an admin/system tool."""
+    for n in names:
+        if not n:
+            continue
+        n = re.sub(r"\.(?:exe|lnk|msc|cpl)$", "", n.strip(), flags=re.I)
+        n = re.sub(r"[^\w\s]", " ", n)
+        if _DANGEROUS_APP_RX.search(n):
+            return True
+    return False
+
+
+def _classify_open(a: dict) -> Decision:
+    hit = find_app(a["name"])
+    exe = shutil.which(a["name"]) or shutil.which(a["name"] + ".exe")
+    if is_dangerous_app(a["name"], hit[0] if hit else None, Path(exe).stem if exe else None):
+        return Decision(YELLOW, "this opens a command shell or an admin/system tool")
+    return Decision(GREEN)
+
+
 @tool("open_app", "Open an installed app by name.",
-      {"name": {"type": "string", "description": "App name as spoken"}}, describe=lambda a: f"Open app: {a['name']}")
+      {"name": {"type": "string", "description": "App name as spoken"}}, describe=lambda a: f"Open app: {a['name']}",
+      classify=_classify_open)
 def open_app(name: str) -> ToolResult:
+    _snapshot_windows(name)
     match = find_app(name)
     if match:
         label, lnk = match

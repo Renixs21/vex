@@ -18,6 +18,7 @@ from brain.llm import FallbackClient, build_client
 from brain.prompts import MEMORY_HEADER, SYSTEM_PROMPT
 from brain.sanitize import clean_reply
 from config import settings
+from safety import context
 from safety.executor import Executor, build_default_executor
 from tools import categories, registry
 from tools.registry import ToolResult
@@ -86,6 +87,7 @@ class Agent:
         elevation = getattr(self.executor, "elevation", None)
         if elevation is not None:
             elevation.begin_turn(user_text)               # only the user's own message can enable admin rights
+        context.begin_turn(user_text)                     # the user's words are the only trusted instruction; clears the taint
         self.history.append({"role": "user", "text": user_text})
         self._trim()
         if hasattr(self.llm, "prefer"):                   # routing: simple one-tool commands go to the small, fast model first

@@ -26,3 +26,17 @@ def rahul(mem):
     mem.remember("Rahul is helping with the portfolio site", about="Rahul")
     mem.remember("Rahul is working on the design", about="Portfolio Site")
     return mem
+
+
+@pytest.fixture(autouse=True)
+def _never_touch_the_real_desktop():
+    """Window and keyboard tools run against a fake in tests; the real Win32 backend raises if anything reaches it."""
+    from fake_windows import NoWindows
+    from safety import context
+    from tools import computer
+
+    computer.set_backend(NoWindows())
+    context.begin_turn("")
+    yield
+    computer.set_backend(None)
+    context.begin_turn("")

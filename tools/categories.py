@@ -14,14 +14,23 @@ import re
 
 from tools import registry
 
-CORE = ("open_app", "play_youtube", "web_search", "recall", "remember", "more_tools")
+CORE = ("open_app", "open_url", "play_youtube", "web_search", "recall", "remember", "more_tools")
 
 CATEGORIES: dict[str, dict] = {
     "files": {
-        "tools": ["create_file", "read_file", "list_dir", "move_file", "copy_file", "delete_file", "undo_last"],
-        "summary": "create, read, list, move, copy, delete files and folders; undo",
+        "tools": ["create_file", "read_file", "list_dir", "move_file", "copy_file", "append_to_file", "replace_in_file",
+                  "overwrite_file", "delete_file", "undo_last"],
+        "summary": "create, read, edit (append, replace, overwrite), list, move, copy, delete files and folders; undo",
         "keywords": ["file", "files", "folder", "folders", "directory", "document", "documents", "desktop", "downloads",
-                     "rename", "move", "copy", "delete", "trash", "recycle", "undo", "txt", "bat", "cmd", "ps1", "script"],
+                     "rename", "move", "copy", "delete", "trash", "recycle", "undo", "txt", "bat", "cmd", "ps1", "script",
+                     "edit", "append", "replace", "overwrite", "rewrite", "insert", "modify", "add a line", "add to"],
+    },
+    "computer": {
+        "tools": ["type_text", "press_keys", "list_windows", "focus_window", "minimize_window", "maximize_window", "restore_window",
+                  "snap_window", "show_desktop", "close_window"],
+        "summary": "type text or press keys in an app, and manage windows (minimize, maximize, snap, show desktop, close)",
+        "keywords": ["window", "windows", "minimize", "maximize", "snap", "show desktop", "type", "typing", "write", "keyboard",
+                     "press", "keys", "shortcut", "ctrl", "enter", "paste", "focus", "switch to", "fullscreen", "full screen"],
     },
     "apps": {
         "tools": ["close_app", "install_app", "uninstall_app"],

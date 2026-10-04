@@ -1,4 +1,4 @@
-"""Undo for file actions: create, copy, move and delete. Memory edits are not undoable (except notes in the Recycle Bin).
+"""Undo for file actions: create, edit, copy, move and delete. Memory edits are not undoable (except notes in the Recycle Bin).
 
 Undo never overwrites anything: it refuses if the original location is occupied. Removals go to the Recycle Bin, so
 even an undo can be reversed. Deleted files are restored by reading the Recycle Bin's own $I/$R records.
@@ -125,6 +125,28 @@ class UndoStack:
             return ok, msg, entry.get("audit_id")
 
     @staticmethod
+    def _undo_edit(e: dict) -> tuple[bool, str]:
+        """Put back the text the file had before the edit. Refuses if the file was changed again since (nothing is ever lost)."""
+        import hashlib
+
+        p, backup = Path(e["path"]), Path(e["backup"])
+        if not backup.exists():
+            return False, "The saved copy from before the edit is gone, so I can't undo it."
+        if not p.exists():
+            return False, f"{p.name} isn't there any more."
+        if hashlib.sha256(p.read_bytes()).hexdigest() != e.get("after_sha"):
+            return False, f"{p.name} has been changed since my edit, so I won't overwrite it."
+        data = backup.read_bytes()
+        tmp = p.with_name(f".{p.name}.undo.tmp")
+        try:
+            tmp.write_bytes(data)
+            tmp.replace(p)
+        finally:
+            tmp.unlink(missing_ok=True)
+        backup.unlink(missing_ok=True)
+        return True, f"Restored the earlier version of {p.name}."
+
+    @staticmethod
     def _apply(e: dict) -> tuple[bool, str]:
         kind = e["kind"]
         try:
@@ -145,6 +167,8 @@ class UndoStack:
                 return True, f"Moved {src.name} back to {src.parent}."
             if kind == "deleted":
                 return restore_from_recycle_bin(e["path"])
+            if kind == "edited":
+                return UndoStack._undo_edit(e)
         except OSError as ex:
             return False, f"Undo failed: {ex}"
         return False, f"I don't know how to undo '{kind}'."
