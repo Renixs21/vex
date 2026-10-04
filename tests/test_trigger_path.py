@@ -184,7 +184,7 @@ def test_main_refuses_a_second_copy(monkeypatch, capsys):
     from ui import single_instance
 
     monkeypatch.setattr(single_instance, "acquire", lambda: (False, 4242))
-    assert main.main([]) == 1
+    assert main.main([]) == 3                       # 3 = "already running": the supervisor must not call it a crash
     assert "already running (process 4242)" in capsys.readouterr().out
 
 

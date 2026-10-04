@@ -45,9 +45,24 @@ def build_visual(ui_cfg: dict, pill, on_click, notify):
         log.warning("click port %s unavailable (%s); clicking the orb won't start listening", ui_cfg["orb_click_port"], e)
     orb_front = OrbFrontend(ui_cfg["orb_port"])
     if mode == "both":
-        return MultiFrontend([orb_front, pill]), orb, clicks
-    pill.hide()
-    return MultiFrontend([orb_front, NullFrontend()]), orb, clicks
+        multi = MultiFrontend([orb_front, pill])
+    else:
+        pill.hide()
+        multi = MultiFrontend([orb_front, NullFrontend()])
+
+    def orb_gave_up() -> None:                                   # the orb keeps dying: the small built-in pill takes over, and Vex says so
+        log.error("the orb crashed repeatedly; switching to the built-in pill")
+        multi.frontends = [f for f in multi.frontends if f is not orb_front]
+        if pill not in multi.frontends:
+            multi.frontends.append(pill)
+        pill.show()
+        notify("Vex", "The orb keeps crashing, so I switched to the small pill. Everything else still works. "
+                      f"Details: {config.log_file()}")
+
+    import config
+
+    orb.watch(orb_gave_up)
+    return multi, orb, clicks
 
 
 def build_wakeword(controller, stack, notify):
@@ -79,6 +94,31 @@ def build_wakeword(controller, stack, notify):
     controller.on_interaction_start.append(listener.pause)                      # every turn, whatever started it
     controller.on_interaction_end.append(listener.resume)                       # after the reply has finished speaking
     return listener
+
+
+QUIET_SECONDS = 90.0
+WATCHDOG_SECONDS = 30
+MAX_RESTARTS = 3
+
+
+def build_watches(hotkey, hotkey_ok: bool, wake, tray, controller) -> list:
+    """Watches that bring a dead hotkey thread or wake word listener back (3 times in 10 minutes, then one message)."""
+    import config
+    from ui.recovery import ComponentWatch
+
+    def giveup(name: str) -> None:
+        tray.notify("Vex", f"{name} keeps failing, so I've stopped retrying it. Everything else still works. Details: {config.log_file()}",
+                    force=True)
+
+    watches = [ComponentWatch("the hotkey", lambda: hotkey.active, hotkey.start, giveup, wanted=lambda: hotkey_ok)]
+    if wake is not None:
+        def wake_healthy() -> bool:
+            t = getattr(wake, "_thread", None)
+            return t is not None and t.is_alive()
+
+        watches.append(ComponentWatch("the wake word listener", wake_healthy, wake.start, giveup,
+                                      wanted=lambda: tray.actions["wakeword"].isChecked() and not controller.mic_muted))
+    return watches
 
 
 def startup_summary(parts: dict, hotkey_text: str, console: bool) -> list[str]:
@@ -160,8 +200,11 @@ def build_consolidator(controller):
         return None
 
 
-def run(on_ready=None, console: bool = False) -> int:
-    """Start the app. `on_ready(parts: dict)` (optional) is called once everything is built, before the event loop starts."""
+def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: int = 0) -> int:
+    """Start the app. `on_ready(parts: dict)` (optional) is called once everything is built, before the event loop starts.
+
+    quiet: a start from Windows autostart: tray only, no toasts for the first minute (except `restarted` and the one-time autostart notice).
+    restarted: the supervisor restarted Vex after a crash; one toast says so."""
     import signal
 
     from PySide6.QtCore import QTimer
@@ -249,6 +292,9 @@ def run(on_ready=None, console: bool = False) -> int:
 
     tray = TrayController(app, controller, frontend, executor, on_quit=cleanup, hotkey_text=pretty_combo(ui_cfg["hotkey"]))
     holder["tray"] = tray
+    if quiet:
+        tray.set_quiet(QUIET_SECONDS)
+    controller.on_mute_change.append(tray.refresh_mute_icon)
 
     def open_viewer() -> None:
         if "viewer" not in holder:
@@ -271,7 +317,8 @@ def run(on_ready=None, console: bool = False) -> int:
     tray.show()
     frontend.show()
     frontend.set_state("idle")
-    tray.set_hotkey_status(hotkey.start(), pretty_combo(ui_cfg["hotkey"]))
+    hotkey_ok = hotkey.start()
+    tray.set_hotkey_status(hotkey_ok, pretty_combo(ui_cfg["hotkey"]))
     reminders.start()
     if wake is not None:
         import config as _config
@@ -280,6 +327,30 @@ def run(on_ready=None, console: bool = False) -> int:
         tray.set_wakeword_status(wake.label, on)
         if on:
             wake.start()
+
+        def on_mute_change() -> None:                            # muted = the microphone is released entirely (no wake word stream either)
+            if controller.mic_muted:
+                wake.stop()
+            elif tray.actions["wakeword"].isChecked():
+                wake.start()
+
+        controller.on_mute_change.append(on_mute_change)
+    watches = build_watches(hotkey, hotkey_ok, wake, tray, controller)
+    watchdog = QTimer()
+    watchdog.timeout.connect(lambda: [w.check() for w in watches])
+    watchdog.start(WATCHDOG_SECONDS * 1000)
+    holder["watchdog"] = watchdog
+    from ui import autostart
+
+    try:
+        if autostart.ensure_default() == "enabled":
+            tray.notify("Vex starts with Windows now",
+                        "From now on Vex starts quietly when you log in. Turn it off any time: tray > Start with Windows.", force=True)
+    except Exception:  # noqa: BLE001 - never block startup over this
+        log.exception("autostart setup failed")
+    if restarted:
+        tray.notify("Vex restarted", f"Vex had a problem and was restarted ({restarted} of {MAX_RESTARTS} allowed in 10 minutes). "
+                                     f"Details: {config.log_file()}", force=True)
     parts = {"app": app, "controller": controller, "frontend": frontend, "tray": tray, "executor": executor,
              "confirmer": confirmer, "dialog": dialog, "agent": agent, "hotkey": hotkey, "capture": controller.capture,
              "typed": typed, "voice": stack, "orb": orb, "pill": pill, "wakeword": wake}

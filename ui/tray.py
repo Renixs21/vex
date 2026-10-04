@@ -1,7 +1,8 @@
 """System tray icon and menu.
 
-Items: status, Listen now, Show Vex, Mute microphone, Wake word, Dry run, Open memory, Open logs, Quit.
-Toggles act immediately; "Wake word" is saved to config.toml, the others last for the session. The menu works even if the
+Items: status, Listen now, Show Vex, Mute mic / pause listening, Wake word, Start with Windows, Dry run, Open memory, Open logs, Quit.
+The icon shows whether Vex is listening (orb with a green dot) or muted (grey orb with a red bar). Toggles act immediately; "Wake word" and
+"Start with Windows" are remembered across restarts, the others last for the session. The menu works even if the
 global hotkey could not be registered.
 """
 from __future__ import annotations
@@ -13,7 +14,7 @@ from typing import Callable
 
 import config
 from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap, QRadialGradient
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 log = logging.getLogger("vex.tray")
@@ -21,16 +22,21 @@ log = logging.getLogger("vex.tray")
 STATUS = {"idle": "Ready", "listening": "Listening…", "thinking": "Thinking…", "speaking": "Speaking"}
 
 
-def make_icon() -> QIcon:
-    """A small orb drawn in code (rust and lavender), so no image file is needed."""
+def make_icon(muted: bool = False) -> QIcon:
+    """A small orb drawn in code (rust and lavender), so no image file is needed. Listening: a green dot. Muted: grey with a red bar."""
     pm = QPixmap(64, 64)
     pm.fill(Qt.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
     g = QRadialGradient(26, 24, 40)
-    g.setColorAt(0.0, QColor("#f27052"))
-    g.setColorAt(0.55, QColor("#bc3e28"))
-    g.setColorAt(1.0, QColor("#2a0d09"))
+    if muted:
+        g.setColorAt(0.0, QColor("#9a9a9a"))
+        g.setColorAt(0.55, QColor("#5c5c5c"))
+        g.setColorAt(1.0, QColor("#1e1e1e"))
+    else:
+        g.setColorAt(0.0, QColor("#f27052"))
+        g.setColorAt(0.55, QColor("#bc3e28"))
+        g.setColorAt(1.0, QColor("#2a0d09"))
     p.setBrush(g)
     p.setPen(Qt.NoPen)
     p.drawEllipse(4, 4, 56, 56)
@@ -39,6 +45,14 @@ def make_icon() -> QIcon:
     h.setColorAt(1.0, QColor(150, 156, 246, 0))
     p.setBrush(h)
     p.drawEllipse(4, 4, 56, 56)
+    if muted:
+        pen = QPen(QColor("#ff3b30"), 7, Qt.SolidLine, Qt.RoundCap)
+        p.setPen(pen)
+        p.drawLine(14, 50, 50, 14)
+    else:
+        p.setPen(QPen(QColor("#0b2a14"), 2))
+        p.setBrush(QColor("#34c759"))
+        p.drawEllipse(40, 40, 20, 20)
     p.end()
     return QIcon(pm)
 
@@ -47,7 +61,7 @@ class TrayController(QObject):
     _state_sig = Signal(str)
 
     def __init__(self, app: QApplication, controller, frontend, executor, *, config_path: Path | None = None,
-                 on_quit: Callable[[], None] | None = None, hotkey_text: str = "Ctrl+Alt+V", parent=None):
+                 on_quit: Callable[[], None] | None = None, hotkey_text: str = "Ctrl+Alt+V", parent=None, autostart_api=None):
         super().__init__(parent)
         self.app = app
         self.controller = controller
@@ -57,8 +71,13 @@ class TrayController(QObject):
         self.on_quit = on_quit
         self.on_open_memory: Callable[[], None] | None = None       # set by the app: opens the memory viewer window
         self.visible = True
+        self.quiet_until = 0.0                                      # monotonic time; until then ordinary notifications are only logged
+        if autostart_api is None:
+            from ui import autostart as autostart_api
+        self.autostart = autostart_api
+        self.icon_listening, self.icon_muted = make_icon(False), make_icon(True)
 
-        self.tray = QSystemTrayIcon(make_icon(), self)
+        self.tray = QSystemTrayIcon(self.icon_muted if controller.mic_muted else self.icon_listening, self)
         self.menu = QMenu()
         self.actions: dict[str, QAction] = {}
 
@@ -69,8 +88,9 @@ class TrayController(QObject):
         self._add("type", "Type a command", self._type_command)
         self.menu.addSeparator()
         self._add("show", "Show Vex", self._toggle_visual, checked=True)
-        self._add("mute", "Mute microphone", self._toggle_mic, checked=controller.mic_muted)
+        self._add("mute", "Mute mic / pause listening", self._toggle_mic, checked=controller.mic_muted)
         self._add("wakeword", "Wake word", self._toggle_wakeword, checked=bool(config.settings["wakeword"]["enabled"]))
+        self._add("autostart", "Start with Windows", self._toggle_autostart, checked=self._autostart_on())
         self._add("dry_run", "Dry run (change nothing)", self._toggle_dry_run, checked=bool(executor.dry_run))
         self.menu.addSeparator()
         self._add("memory", "Open memory", self._open_memory)
@@ -105,7 +125,18 @@ class TrayController(QObject):
     def hide(self) -> None:
         self.tray.hide()
 
-    def notify(self, title: str, message: str) -> None:
+    def set_quiet(self, seconds: float) -> None:
+        """A quiet start (autostart): ordinary notifications are only logged for this long; `notify(..., force=True)` still shows."""
+        import time
+
+        self.quiet_until = time.monotonic() + seconds
+
+    def notify(self, title: str, message: str, force: bool = False) -> None:
+        import time
+
+        if not force and time.monotonic() < self.quiet_until:
+            log.info("(quiet start) %s: %s", title, message)
+            return
         if QSystemTrayIcon.supportsMessages() and self.tray.isVisible():
             self.tray.showMessage(title, message, QSystemTrayIcon.Information, 6000)
         else:
@@ -122,7 +153,28 @@ class TrayController(QObject):
         self.hotkey_action.setText(f"Hotkey {combo}" + ("" if active else " (unavailable)"))
 
     # ---- handlers --------------------------------------------------------------------------------------------------------
+    def _autostart_on(self) -> bool:
+        try:
+            return bool(self.autostart.is_enabled())
+        except Exception:  # noqa: BLE001
+            return False
+
+    def refresh_mute_icon(self) -> None:
+        """Icon, tooltip and menu checkmark follow controller.mic_muted (also when it was changed by voice or a hook)."""
+        muted = bool(self.controller.mic_muted)
+        self.tray.setIcon(self.icon_muted if muted else self.icon_listening)
+        act = self.actions.get("mute")
+        if act is not None and act.isChecked() != muted:
+            act.blockSignals(True)
+            act.setChecked(muted)
+            act.blockSignals(False)
+        self._on_state(self.controller.state)
+
     def _on_state(self, state: str) -> None:
+        if self.controller.mic_muted:
+            self.status_action.setText("Vex: MUTED (not listening)")
+            self.tray.setToolTip("Vex: muted, not listening")
+            return
         self.status_action.setText(f"Vex: {STATUS.get(state, state)}")
         self.tray.setToolTip(f"Vex: {STATUS.get(state, state)}")
 
@@ -142,7 +194,24 @@ class TrayController(QObject):
 
     def _toggle_mic(self, checked: bool) -> None:
         self.controller.set_mic_muted(checked)
-        self.notify("Microphone", "Muted: Vex won't listen." if checked else "Unmuted.")
+        self.refresh_mute_icon()
+        self.notify("Microphone", "Muted: Vex isn't listening (no wake word, no hotkey recording)." if checked else "Listening again.")
+
+    def _toggle_autostart(self, checked: bool) -> None:
+        try:
+            if checked:
+                self.autostart.enable()
+                self.notify("Start with Windows", "On: Vex starts quietly when you log in.")
+            elif self.autostart.disable():
+                self.notify("Start with Windows", "Off. Vex won't start with Windows, and won't turn this on again by itself.")
+            else:
+                self.notify("Start with Windows", "Couldn't remove the startup entry. Run: python -m ui.autostart --off")
+        except Exception as e:  # noqa: BLE001
+            log.exception("autostart toggle failed")
+            self.notify("Start with Windows", f"That didn't work: {e}")
+        self.actions["autostart"].blockSignals(True)
+        self.actions["autostart"].setChecked(self._autostart_on())
+        self.actions["autostart"].blockSignals(False)
 
     def _toggle_wakeword(self, checked: bool) -> None:
         try:

@@ -155,6 +155,8 @@ class OrbProcess:
         self._in_use = port_in_use
         self.proc = None
         self.started_by_us = False
+        self._stopping = False
+        self._watch_thread: threading.Thread | None = None
 
     @property
     def available(self) -> bool:
@@ -191,8 +193,30 @@ class OrbProcess:
         log.warning("the orb didn't start listening within %.0f s", wait)
         return False
 
+    def crashed(self) -> bool:
+        """True if an orb that we started has died without being asked to."""
+        return self.started_by_us and not self._stopping and self.proc is not None and self.proc.poll() is not None
+
+    def watch(self, on_giveup: Callable[[], None], budget=None, interval: float = 5.0, on_restart: Callable[[], None] | None = None) -> None:
+        """Restart the orb if it dies: at most 3 times in 10 minutes, then `on_giveup()` (the caller falls back to the pill and says so)."""
+        from ui.recovery import ComponentWatch, RestartBudget
+
+        w = ComponentWatch("the orb", lambda: not self.crashed(), lambda: (self.start(), on_restart and on_restart()),
+                           lambda name: on_giveup(), budget=budget or RestartBudget())
+        self.watcher = w
+
+        def loop() -> None:
+            while not self._stopping:
+                time.sleep(interval)
+                if self._stopping or w.check() == "gave_up":
+                    return
+
+        self._watch_thread = threading.Thread(target=loop, name="orb-watch", daemon=True)
+        self._watch_thread.start()
+
     def stop(self) -> None:
         """Close an orb that we started (never one the user launched themselves)."""
+        self._stopping = True
         if not self.started_by_us or self.proc is None:
             return
         try:

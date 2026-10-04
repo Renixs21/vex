@@ -31,3 +31,5 @@ Approvals for yellow and red actions appear as native dialogs. Manual checks for
 The visual is the orb in `vex_ui/` (see `docs/ORB.md`); voice is described in `docs/VOICE.md`.
 
 Say "Hey Jarvis" (the built-in fallback) or, once you've trained it, "Hey Vex": see `docs/WAKEWORD.md`. Run `python main.py --console` to watch every stage in the terminal.
+
+Starting with Windows, crash recovery, the mute icon: see `docs/STARTUP.md`.

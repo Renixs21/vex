@@ -353,6 +353,9 @@ def fake_orb(monkeypatch):
         def stop(self):
             self.stopped = True
 
+        def watch(self, on_giveup, **kw):
+            self.on_giveup = on_giveup
+
     monkeypatch.setattr(of, "OrbProcess", FakeOrbProcess)
     monkeypatch.setattr(of, "ClickListener", lambda port, cb: SimpleNamespace(start=lambda: None, stop=lambda: None, port=port))
     return state

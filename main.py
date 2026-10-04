@@ -3,6 +3,7 @@
     python main.py             the app: tray + orb + hotkey + voice. Prints what it started and where the log is.
     python main.py --console   same, and streams every log line to this terminal (stay in the foreground, Ctrl+C quits)
     python main.py --text      terminal chat
+    python main.py --supervise keep Vex running: restart it if it crashes (3 times in 10 minutes), never after Quit Vex
     ... --dry-run              tools only report what they would do
 """
 from __future__ import annotations
@@ -66,6 +67,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--text", action="store_true", help="terminal chat mode")
     ap.add_argument("--console", action="store_true", help="stay in the foreground and print every log line to this terminal")
     ap.add_argument("--dry-run", action="store_true", help="log what tools would do without doing it")
+    ap.add_argument("--supervise", action="store_true", help="run Vex under the supervisor (what Windows autostart uses)")
+    ap.add_argument("--startup-delay", type=float, default=0.0, help="with --supervise: wait this many seconds before starting")
+    ap.add_argument("--quiet", action="store_true", help="start quietly: tray only, no toasts for the first minute, no sounds")
+    ap.add_argument("--restarted", type=int, default=0, help=argparse.SUPPRESS)       # set by the supervisor on a restart
     return ap
 
 
@@ -76,6 +81,14 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
     if args.dry_run:
         os.environ["DRY_RUN"] = "true"
+    if args.supervise:
+        from pathlib import Path
+
+        from ui import supervisor
+
+        logs = config.ROOT / config.settings["paths"]["logs"]
+        supervisor.setup_logging(logs)
+        return supervisor.run(config.ROOT, logs, startup_delay=args.startup_delay, quiet=args.quiet)
     config.setup_logging(console=args.console)
     if args.text:
         return run_text()
@@ -87,10 +100,10 @@ def main(argv: list[str] | None = None) -> int:
         who = f" (process {other})" if other else ""
         print(f"Vex is already running{who}. Look for its icon in the system tray, or close that copy first "
               "(tray menu > Quit Vex). Not starting a second one.")
-        return 1
+        return 3                                                  # the supervisor reads 3 as "already running", not a crash
     from ui.app import run
 
-    return run(console=args.console)
+    return run(console=args.console, quiet=args.quiet, restarted=args.restarted)
 
 
 if __name__ == "__main__":

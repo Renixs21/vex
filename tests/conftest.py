@@ -62,3 +62,34 @@ def _no_real_internet_for_web_tools(monkeypatch):
     web._cache.clear()
     yield
     web._cache.clear()
+
+
+class FakeRegistry:
+    """Stands in for the HKCU Run key: tests never read or write the real registry."""
+
+    def __init__(self):
+        self.value = None
+        self.log = []
+
+    def get(self):
+        return self.value
+
+    def set(self, command):
+        self.value = command
+        self.log.append(("set", command))
+
+    def delete(self):
+        self.value = None
+        self.log.append(("delete", None))
+
+
+@pytest.fixture(autouse=True)
+def _autostart_never_touches_the_real_registry(tmp_path_factory):
+    from ui import autostart
+
+    reg = FakeRegistry()
+    autostart.set_backend(reg)
+    autostart.set_state_path(tmp_path_factory.mktemp("autostart") / "autostart.json")
+    yield reg
+    autostart.set_backend(autostart.RegistryBackend())
+    autostart.set_state_path(None)

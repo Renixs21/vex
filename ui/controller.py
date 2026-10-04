@@ -76,6 +76,7 @@ class VexController:
         self._sleep_after = False
         self.on_interaction_start: list[Callable[[], None]] = []
         self.on_interaction_end: list[Callable[[], None]] = []
+        self.on_mute_change: list[Callable[[], None]] = []             # after the microphone is muted/unmuted (read controller.mic_muted)
         self.on_turn: list[Callable[[str, str], None]] = []       # (what you said, Vex's reply) after each answered turn
         self.listeners: list[Callable[[str], None]] = []       # called with the new state on every change
         self.on_wakeword_toggle: list[Callable[[bool], None]] = []   # the tray's Wake word switch (listener comes later)
@@ -178,6 +179,7 @@ class VexController:
         self.mic_muted = muted
         if muted and self.state == LISTENING:
             self.cancel_capture()
+        self._run_hooks(self.on_mute_change, "mute change")           # the app stops/starts the wake word listener, the tray icon follows
 
     def cancel_capture(self) -> None:
         for cap in {id(c): c for c in (self._active_capture, self.capture, self.typed_capture) if c is not None}.values():
