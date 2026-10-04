@@ -138,6 +138,25 @@ def build_curator(controller):
         return None
 
 
+def build_consolidator(controller):
+    """The nightly memory tidy-up, or None if it is off or can't start. Never raises."""
+    import config
+
+    if not config.settings["memory"]["consolidate"]:
+        return None
+    try:
+        from memory.consolidate import Consolidator
+        from tools import memory as memory_tools
+
+        con = Consolidator(memory_tools.get_memory(), is_busy=lambda: controller.state != "idle",
+                           log_path=config.ROOT / config.settings["paths"]["logs"] / "memory_consolidation.jsonl")
+        con.start()
+        return con
+    except Exception:  # noqa: BLE001
+        log.exception("memory consolidation could not start")
+        return None
+
+
 def run(on_ready=None, console: bool = False) -> int:
     """Start the app. `on_ready(parts: dict)` (optional) is called once everything is built, before the event loop starts."""
     import signal
@@ -199,10 +218,13 @@ def run(on_ready=None, console: bool = False) -> int:
                                stack.capture if stack else typed, typed_capture=typed)
     holder["controller"] = controller
     curator = build_curator(controller)
+    consolidator = build_consolidator(controller)
 
     def cleanup() -> None:
         if curator is not None:
             curator.stop()
+        if consolidator is not None:
+            consolidator.stop()
         if wake is not None:
             wake.stop()
         hotkey.stop()

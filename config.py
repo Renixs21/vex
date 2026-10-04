@@ -46,6 +46,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "curator_order": ["groq-small", "groq", "gemini"],   # cheap model first: it must not use up what live replies need
         "curator_min_words": 6,          # conversations with fewer user words in total are skipped without an LLM call
         "curator_max_attempts": 6,       # then the conversation is dropped (and logged)
+        "consolidate": True,             # nightly tidy-up (~03:00, or at the next start if missed); log: logs/memory_consolidation.jsonl
     },
     "wakeword": {"enabled": True, "model_path": "models/hey_vex.onnx", "fallback_model": "hey_jarvis", "threshold": 0.5,
                  "cooldown": 2.0, "vad_threshold": 0.5, "input_device": "", "chime": True},

@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from memory.api import Memory
+from memory.api import Memory, Result
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,6 +30,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--yes", "-y", action="store_true", help="skip all prompts (mentions use --mentions)")
     p.add_argument("--mentions", choices=["redact", "delete"], default="redact",
                    help="facts that only mention the person: remove just the name (default) or delete the fact")
+
+    p = sub.add_parser("consolidate", help="merge duplicates, promote the inbox, compress old daily notes, decay importance")
+    p.add_argument("--dry-run", action="store_true", help="only report what it would change")
 
     sub.add_parser("reindex", help="rebuild the index from the markdown files")
     sub.add_parser("stats", help="counts and recent changes")
@@ -75,6 +78,14 @@ def run(args: argparse.Namespace) -> int:
                     if ans.strip().lower().startswith("d"):
                         choices[(m["note_id"], m["block_id"])] = "delete"
                 res = mem.forget(args.query, confirm=True, mentions=args.mentions, choices=choices)
+        elif args.cmd == "consolidate":
+            from memory.consolidate import Consolidator
+
+            out = Consolidator(mem).run(dry_run=args.dry_run)
+            lines = [f"{'Would change' if args.dry_run else 'Changed'}: {out['counts']}"]
+            lines += [f"  {c['event']}: " + ", ".join(f"{k}={v}" for k, v in c.items() if k not in ('ts', 'event', 'dry_run'))[:200]
+                      for c in out["changes"] if c["event"] != "run"]
+            res = Result(True, chr(10).join(lines), out["counts"])
         elif args.cmd == "reindex":
             res = mem.reindex()
         elif args.cmd == "stats":

@@ -45,6 +45,7 @@ curator_idle_seconds = 120           # a conversation is over after this much qu
 curator_order = ["groq-small", "groq", "gemini"]   # cheap model first, so live replies keep their rate limit
 curator_min_words = 6                # shorter conversations are skipped without an LLM call
 curator_max_attempts = 6             # failed/rate-limited conversations are retried later, then dropped (and logged)
+consolidate = true                   # nightly tidy-up (~03:00, or at the next start if missed); log: logs/memory_consolidation.jsonl
 
 [wakeword]
 enabled = true                       # tray toggle too; every value here is validated, a bad one falls back to its default
