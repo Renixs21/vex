@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VexMind</title>
+<style>
+:root {
+  --bg: #15110f; --panel: #1d1815; --panel2: #262019; --line: #382f27; --text: #efe6df; --muted: #a39385;
+  --rust: #d9663f; --rust-soft: #3a211a; --lav: #b9a8ea; --lav-soft: #2a2540; --ok: #7fb88a; --warn: #e0b14a; --bad: #e0675c;
+  --c-person: #b9a8ea; --c-project: #d9663f; --c-topic: #e0b14a; --c-place: #7fb88a; --c-profile: #f1e3d3; --c-preference: #e58fb7;
+  --c-task-list: #9a948d; --c-daily: #7f90ba; --c-ghost: #6d6258; --glow: rgba(217,102,63,.25);
+}
+:root[data-theme="light"] {
+  --bg: #f6f0ea; --panel: #fffaf5; --panel2: #f0e7de; --line: #dccfc2; --text: #2b211a; --muted: #7b6a5c;
+  --rust: #c4502b; --rust-soft: #f7dfd5; --lav: #6f58c4; --lav-soft: #e8e2fa; --ok: #3f8a52; --warn: #a97a12; --bad: #c0392b;
+  --c-person: #7b62d6; --c-project: #c4502b; --c-topic: #b9871a; --c-place: #3f8a52; --c-profile: #6b5645; --c-preference: #c24a82;
+  --c-task-list: #7d776f; --c-daily: #5a6fa3; --c-ghost: #b3a698; --glow: rgba(196,80,43,.2);
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; display: flex; overflow: hidden; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 12px; cursor: pointer; }
+button:hover { border-color: var(--rust); }
+button.primary { background: var(--rust); border-color: var(--rust); color: #fff; }
+button.ghost { background: transparent; }
+input, select, textarea { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--lav); }
+a { color: var(--lav); text-decoration: none; cursor: pointer; }
+a:hover { text-decoration: underline; }
+a.ghostlink { color: var(--muted); border-bottom: 1px dashed var(--muted); }
+
+#side { width: 270px; min-width: 270px; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+#brand { padding: 14px 16px 6px; display: flex; align-items: center; gap: 10px; }
+#brand .orb { width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 30% 70%, #f5b79d, var(--rust) 55%, #6d2a17); box-shadow: 0 0 14px var(--glow); }
+#brand b { font-size: 16px; letter-spacing: .3px; }
+#brand .sp { flex: 1; }
+#search { margin: 8px 14px; }
+#tabs { display: flex; gap: 4px; padding: 0 14px 8px; }
+#tabs button { flex: 1; padding: 4px 0; font-size: 12px; background: transparent; border-color: transparent; color: var(--muted); }
+#tabs button.on { background: var(--lav-soft); color: var(--lav); }
+#tabs .badge { background: var(--rust); color: #fff; border-radius: 9px; padding: 0 6px; margin-left: 4px; font-size: 11px; }
+#list { flex: 1; overflow-y: auto; padding: 0 8px 14px; }
+.grp { margin: 10px 8px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+.item { padding: 4px 10px; border-radius: 7px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.item:hover, .item.sel { background: var(--panel2); }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.item small { color: var(--muted); margin-left: auto; font-size: 11px; }
+.snip { color: var(--muted); font-size: 12px; margin: -2px 10px 6px 27px; }
+
+#main { flex: 1; position: relative; min-width: 0; }
+#graph { position: absolute; inset: 0; }
+#bar { position: absolute; top: 12px; left: 14px; right: 14px; display: flex; gap: 8px; align-items: center; pointer-events: none; z-index: 2; }
+#bar > * { pointer-events: auto; }
+#bar .sp { flex: 1; pointer-events: none; }
+#legend { position: absolute; left: 14px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); z-index: 2; max-width: 70%; }
+#legend span { display: flex; align-items: center; gap: 5px; }
+#empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: var(--muted); text-align: center; padding: 40px; z-index: 1; }
+#inbox { position: absolute; inset: 0; overflow-y: auto; padding: 56px 28px 28px; display: none; background: var(--bg); z-index: 3; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 0 auto 12px; max-width: 760px; }
+.card .fact { font-size: 15px; margin-bottom: 8px; }
+.card .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.chip { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 12px; background: var(--panel2); color: var(--muted); border: 1px solid var(--line); }
+.chip.warn { color: var(--warn); } .chip.bad { color: var(--bad); }
+.card .sp { flex: 1; }
+
+#note { width: 440px; min-width: 440px; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; display: none; padding: 18px 20px 30px; }
+#note h1 { margin: 0 0 4px; font-size: 22px; }
+#note h2 { font-size: 15px; margin: 18px 0 6px; color: var(--lav); }
+#note .meta { color: var(--muted); font-size: 12px; margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+#note .top { display: flex; gap: 8px; align-items: center; }
+#note .top .sp { flex: 1; }
+.fact-li { margin: 6px 0; padding-left: 14px; position: relative; }
+.fact-li::before { content: ""; position: absolute; left: 0; top: 9px; width: 6px; height: 6px; border-radius: 50%; background: var(--rust); }
+.fact-li .prov { display: block; font-size: 11px; color: var(--muted); }
+.tag { color: var(--rust); cursor: pointer; }
+.back { margin: 6px 0; font-size: 13px; }
+.back .t { color: var(--muted); }
+#editor { width: 100%; height: 62vh; font: 13px/1.5 Consolas, monospace; resize: vertical; }
+.err { color: var(--bad); margin: 6px 0; font-size: 13px; }
+.toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--rust); padding: 8px 16px; border-radius: 10px; z-index: 9; display: none; }
+@media (max-width: 1100px) { #note { width: 340px; min-width: 340px; } }
+</style>
+</head>
+<body>
+<aside id="side">
+  <div id="brand"><div class="orb"></div><b>VexMind</b><span class="sp"></span><button class="ghost" id="theme" title="Light / dark">&#9680;</button></div>
+  <input id="search" type="search" placeholder="Search notes and facts" autocomplete="off">
+  <div id="tabs">
+    <button data-tab="notes" class="on">Notes</button><button data-tab="tags">Tags</button>
+    <button data-tab="recent">Recent</button><button data-tab="inbox">Inbox<span class="badge" id="badge" hidden>0</span></button>
+  </div>
+  <div id="list"></div>
+</aside>
+<section id="main">
+  <div id="bar"><button id="fit">Fit</button><label class="chip"><input type="checkbox" id="daily" style="padding:0"> daily notes</label><span class="sp"></span><span class="chip" id="count"></span></div>
+  <div id="graph"></div>
+  <div id="empty"><div><h2>Nothing remembered yet</h2><p>Tell Vex something like &ldquo;remember my exam is on the 20th&rdquo; and it shows up here.</p></div></div>
+  <div id="legend"></div>
+  <div id="inbox"></div>
+</section>
+<aside id="note"></aside>
+<div class="toast" id="toast"></div>
+
+<script src="vendor/force-graph.min.js"></script>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script>
+"use strict";
+const TYPES = ["person", "project", "topic", "place", "profile", "preference", "task-list", "daily", "ghost"];
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const colorOf = t => css("--c-" + t) || css("--c-topic");
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+let bridge = null, graph = null, data = {nodes: [], edges: []}, side = {}, tab = "notes", currentId = null, editing = false;
+let hover = null, matches = null, lastVersion = null, tagFilter = null, needFit = true;
+
+const api = (m, ...a) => new Promise(res => bridge.call(m, JSON.stringify(a), r => res(JSON.parse(r))));
+function toast(t) { const e = $("#toast"); e.textContent = t; e.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => e.style.display = "none", 2600); }
+
+/* ---------- theme ---------- */
+function setTheme(t) { document.documentElement.dataset.theme = t; try { localStorage.setItem("vexmind-theme", t); } catch (e) {} if (graph) graph.refresh(); drawLegend(); }
+(function () { let t = null; try { t = localStorage.getItem("vexmind-theme"); } catch (e) {}
+  if (!t) t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"; document.documentElement.dataset.theme = t; })();
+$("#theme").onclick = () => setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
+
+/* ---------- graph ---------- */
+function radius(n) { return 4 + Math.sqrt(n.links || 0) * 3 + (n.importance || 3) * .4; }
+function neighborsOf(id) { const s = new Set([id]); data.edges.forEach(e => { const a = e.source.id ?? e.source, b = e.target.id ?? e.target; if (a === id) s.add(b); if (b === id) s.add(a); }); return s; }
+function initGraph() {
+  graph = ForceGraph()($("#graph"))
+    .backgroundColor("rgba(0,0,0,0)")
+    .nodeRelSize(1).nodeVal(n => radius(n) ** 2)
+    .linkColor(l => { const a = l.source.id ?? l.source, b = l.target.id ?? l.target; return hover && (a === hover || b === hover) ? css("--rust") : css("--line"); })
+    .linkWidth(l => { const a = l.source.id ?? l.source, b = l.target.id ?? l.target; return hover && (a === hover || b === hover) ? 2 : 1; })
+    .nodeCanvasObject((n, ctx, k) => {
+      const r = radius(n), near = hover ? neighborsOf(hover) : null;
+      const dim = (near && !near.has(n.id)) || (matches && !matches.has(n.id));
+      ctx.globalAlpha = dim ? .18 : (n.ghost ? .55 : 1);
+      ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 2 * Math.PI);
+      if (n.ghost) { ctx.setLineDash([3, 3]); ctx.strokeStyle = colorOf("ghost"); ctx.lineWidth = 1.4; ctx.stroke(); ctx.setLineDash([]); }
+      else { ctx.fillStyle = colorOf(n.type); ctx.fill(); if (n.id === currentId) { ctx.strokeStyle = css("--text"); ctx.lineWidth = 2; ctx.stroke(); } }
+      if (k > .7 || n.id === hover || n.id === currentId || r > 11) {
+        ctx.font = `${Math.max(11, 12 / Math.sqrt(k))}px "Segoe UI", sans-serif`; ctx.textAlign = "center"; ctx.fillStyle = css("--text");
+        ctx.fillText(n.title, n.x, n.y + r + 11 / Math.sqrt(k) + 2);
+      }
+      ctx.globalAlpha = 1;
+    })
+    .nodePointerAreaPaint((n, color, ctx) => { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(n.x, n.y, radius(n) + 3, 0, 2 * Math.PI); ctx.fill(); })
+    .onNodeHover(n => { hover = n ? n.id : null; $("#graph").style.cursor = n ? "pointer" : "default"; })
+    .onNodeClick(n => n.ghost ? showGhost(n) : openNote(n.id))
+    .cooldownTicks(120).d3VelocityDecay(.35);
+  graph.d3Force("charge").strength(-90);
+  // unlinked notes would drift away forever; a gentle pull to the middle keeps everything on screen
+  const gravity = (() => { let ns = []; const f = al => ns.forEach(n => { n.vx -= (n.x || 0) * .05 * al; n.vy -= (n.y || 0) * .05 * al; }); f.initialize = x => { ns = x; }; return f; })();
+  graph.d3Force("gravity", gravity);
+  graph.onEngineStop(() => { if (needFit) { needFit = false; fit(); } });
+  graph.d3Force("link").distance(54);
+  resize();
+}
+function resize() { if (graph) graph.width($("#main").clientWidth).height($("#main").clientHeight); }
+addEventListener("resize", resize);
+async function loadGraph() {
+  const g = await api("graph", $("#daily").checked);
+  const old = new Map((data.nodes || []).map(n => [n.id, n]));
+  g.nodes.forEach(n => { const o = old.get(n.id); if (o) { n.x = o.x; n.y = o.y; } });
+  data = {nodes: g.nodes, edges: g.edges.map(e => ({...e}))};
+  graph.graphData({nodes: data.nodes, links: data.edges});
+  $("#count").textContent = `${g.nodes.filter(n => !n.ghost).length} notes · ${g.edges.length} links`;
+  $("#empty").style.display = g.nodes.length ? "none" : "flex";
+  drawLegend();
+  if (!old.size) needFit = true;
+}
+function drawLegend() {
+  const used = new Set(data.nodes.map(n => n.type));
+  $("#legend").innerHTML = TYPES.filter(t => used.has(t)).map(t => `<span><i class="dot" style="background:${colorOf(t)}"></i>${t === "ghost" ? "no note yet" : t}</span>`).join("");
+}
+function fit() { graph.zoomToFit(400, 70); setTimeout(() => { if (graph.zoom() > 2) graph.zoom(2, 300); }, 450); }
+$("#fit").onclick = fit;
+$("#daily").onchange = loadGraph;
+
+/* ---------- sidebar ---------- */
+async function loadSide() {
+  side = await api("sidebar");
+  const b = $("#badge"); b.hidden = !side.inbox; b.textContent = side.inbox;
+  renderList();
+}
+function noteItem(n, extra = "") { return `<div class="item ${n.id === currentId ? "sel" : ""}" data-id="${esc(n.id)}"><i class="dot" style="background:${colorOf(n.type || "topic")}"></i><span>${esc(n.title)}</span>${extra}</div>`; }
+async function renderList() {
+  const el = $("#list"); let html = "";
+  const q = $("#search").value.trim();
+  if (q) {
+    const res = await api("search", q);
+    matches = new Set(res.map(r => r.id));
+    html = res.length ? res.map(r => noteItem(r) + (r.snippet ? `<div class="snip">${esc(r.snippet)}</div>` : "")).join("") : `<div class="grp">No matches</div>`;
+  } else {
+    matches = null;
+    if (tab === "notes") html = Object.entries(side.types || {}).map(([t, ns]) => `<div class="grp">${esc(t)} · ${ns.length}</div>` + ns.map(n => noteItem({...n, type: t})).join("")).join("");
+    else if (tab === "tags") html = tagFilter ? `<div class="grp"><a data-clear>&larr; all tags</a> · #${esc(tagFilter.tag)}</div>` + tagFilter.notes.map(n => noteItem(n)).join("")
+      : ((side.tags || []).map(t => `<div class="item" data-tag="${esc(t.tag)}"><span class="tag">#${esc(t.tag)}</span><small>${t.count}</small></div>`).join("") || `<div class="grp">No tags yet</div>`);
+    else if (tab === "recent") html = (side.recent || []).map(n => noteItem(n, `<small>${esc((n.updated || "").slice(0, 10))}</small>`)).join("");
+  }
+  el.innerHTML = html;
+  if (graph) graph.refresh();
+}
+$("#search").oninput = () => { clearTimeout($("#search").t); $("#search").t = setTimeout(renderList, 160); };
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
+  tab = b.dataset.tab; tagFilter = null; $("#search").value = "";
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("on", x === b));
+  $("#inbox").style.display = tab === "inbox" ? "block" : "none";
+  if (tab === "inbox") loadInbox(); else renderList();
+});
+$("#list").onclick = async e => {
+  const it = e.target.closest(".item"), clear = e.target.closest("[data-clear]");
+  if (clear) { tagFilter = null; return renderList(); }
+  if (!it) return;
+  if (it.dataset.tag) { tagFilter = {tag: it.dataset.tag, notes: await api("notes_with_tag", it.dataset.tag)}; return renderList(); }
+  openNote(it.dataset.id);
+};
+
+/* ---------- note panel ---------- */
+function inline(text) {
+  let s = esc(text);
+  s = s.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (m, target, shown) => `<a data-link="${target}">${shown || target}</a>`);
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|\s)#([\w-]+)/g, '$1<span class="tag" data-tag="$2">#$2</span>');
+  return s;
+}
+function renderBody(n) {
+  const facts = new Map(n.facts.map(f => [f.id, f]));
+  const out = [];
+  for (const line of n.body.split("\n")) {
+    if (/^\s*<!--.*-->\s*$/.test(line) || !line.trim()) continue;
+    const h = line.match(/^(#{1,3})\s+(.*)/);
+    if (h) { if (h[1].length > 1) out.push(`<h2>${inline(h[2])}</h2>`); continue; }
+    const b = line.match(/^\s*[-*]\s+(.*?)(?:\s+\^(f\d+))?\s*$/);
+    if (b) {
+      const f = facts.get(b[2]); const prov = f ? [f.source && "from " + f.source, f.learned && "learned " + f.learned, f.history].filter(Boolean).join(" · ") : "";
+      out.push(`<div class="fact-li">${inline(b[1])}${prov ? `<span class="prov">${esc(prov)}</span>` : ""}</div>`);
+    } else out.push(`<p>${inline(line)}</p>`);
+  }
+  return out.join("") || "<p class='meta'>No facts yet.</p>";
+}
+async function openNote(id) {
+  const n = await api("note", id);
+  if (!n) { toast("That note is gone."); return; }
+  currentId = id; editing = false; hover = null;
+  const el = $("#note"); el.style.display = "block";
+  el.innerHTML = `<div class="top"><span class="chip" style="color:${colorOf(n.type)}">${esc(n.type)}</span><span class="sp"></span><button id="edit">Edit</button><button class="ghost" id="close">&times;</button></div>
+    <h1>${esc(n.title)}</h1>
+    <div class="meta">${n.aliases.length ? "also: " + n.aliases.map(esc).join(", ") + " · " : ""}importance ${n.importance} · updated ${esc((n.updated || "").slice(0, 10))}
+      ${n.tags.map(t => `<span class="tag" data-tag="${esc(t)}">#${esc(t)}</span>`).join(" ")}</div>
+    <div id="body">${renderBody(n)}</div>
+    <h2>Backlinks</h2>${n.backlinks.length ? n.backlinks.map(b => `<div class="back"><a data-id="${esc(b.id)}">${esc(b.title)}</a> <span class="t">${esc(b.text)}</span></div>`).join("") : "<div class='meta'>Nothing links here yet.</div>"}
+    ${n.links_out.length ? `<h2>Links to</h2><div class="meta">${n.links_out.map(l => `<a data-id="${esc(l.id)}">${esc(l.title)}</a>`).join(" · ")}</div>` : ""}`;
+  $("#close").onclick = () => { el.style.display = "none"; currentId = null; resize(); renderList(); };
+  $("#edit").onclick = () => startEdit(n);
+  resize(); renderList();
+  if (graph) { const node = data.nodes.find(x => x.id === id); if (node && node.x != null) graph.centerAt(node.x, node.y, 500); }
+}
+async function startEdit(n) {
+  editing = true; const raw = await api("raw", n.id);
+  const el = $("#note");
+  el.innerHTML = `<div class="top"><b>Editing ${esc(n.title)}</b><span class="sp"></span><button class="ghost" id="cancel">Cancel</button><button class="primary" id="save">Save</button></div>
+    <p class="meta">Plain markdown. Keep the header (the lines between ---) as it is, apart from the title, aliases, tags or importance.</p>
+    <textarea id="editor" spellcheck="false"></textarea><div class="err" id="err"></div>`;
+  $("#editor").value = raw;
+  $("#cancel").onclick = () => openNote(n.id);
+  $("#save").onclick = async () => { const r = await api("save", n.id, $("#editor").value); if (r.ok) { toast("Saved"); await refresh(true); openNote(n.id); } else $("#err").textContent = r.error; };
+}
+function showGhost(n) {
+  currentId = null; const el = $("#note"); el.style.display = "block";
+  el.innerHTML = `<div class="top"><span class="chip">no note yet</span><span class="sp"></span><button class="ghost" id="close">&times;</button></div><h1>${esc(n.title)}</h1>
+    <p class="meta">Some facts link to &ldquo;${esc(n.title)}&rdquo;, but there is no note with that name. Telling Vex something about it (&ldquo;remember that ${esc(n.title)} is...&rdquo;) creates it.</p>`;
+  $("#close").onclick = () => { el.style.display = "none"; resize(); }; resize();
+}
+document.addEventListener("click", async e => {
+  const link = e.target.closest("[data-link]"), tag = e.target.closest("#note [data-tag]"), id = e.target.closest("#note [data-id]");
+  if (link) { const t = await api("resolve", link.dataset.link); if (t) openNote(t); else showGhost({title: link.dataset.link}); }
+  else if (tag) { tab = "tags"; document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("on", x.dataset.tab === "tags")); tagFilter = {tag: tag.dataset.tag, notes: await api("notes_with_tag", tag.dataset.tag)}; renderList(); }
+  else if (id) openNote(id.dataset.id);
+});
+
+/* ---------- inbox ---------- */
+async function loadInbox() {
+  const items = await api("inbox"); const el = $("#inbox");
+  const types = ["person", "project", "topic", "place", "preference", "profile"];
+  el.innerHTML = `<div class="card" style="background:transparent;border:none;padding:0"><h2 style="margin:0 0 4px">Inbox</h2><div class="meta">Facts Vex wasn&rsquo;t sure about. Approve to save them into a note, or discard.</div></div>` +
+    (items.length ? items.map((i, k) => `<div class="card" data-k="${k}"><div class="fact">${esc(i.fact)}</div>
+      <div class="row">${i.confidence != null ? `<span class="chip">confidence ${i.confidence.toFixed(2)}</span>` : ""}${i.reason ? `<span class="chip ${/sensitive|secret|delet/.test(i.reason) ? "bad" : "warn"}">${esc(i.reason)}</span>` : ""}
+      ${i.deletion ? `<span class="sp"></span><span class="meta">Deletions are not applied from here. Say &ldquo;forget&hellip;&rdquo; to Vex.</span><button data-act="discard">Discard</button>`
+        : `<span class="meta">save in note</span><input data-f="note" value="${esc(i.note)}" placeholder="note name" size="16"><select data-f="type">${types.map(t => `<option ${t === i.type ? "selected" : ""}>${t}</option>`).join("")}</select>
+           <span class="sp"></span><button data-act="discard">Discard</button><button class="primary" data-act="approve">Approve</button>`}</div></div>`).join("")
+      : `<div class="card"><div class="meta">Nothing is waiting for your approval.</div></div>`);
+  el.querySelectorAll(".card[data-k]").forEach(card => {
+    const i = items[+card.dataset.k];
+    card.querySelectorAll("button").forEach(b => b.onclick = async () => {
+      const r = b.dataset.act === "approve" ? await api("approve", i.path, i.block, card.querySelector('[data-f="note"]').value, card.querySelector('[data-f="type"]').value) : await api("discard", i.path, i.block);
+      if (r.ok) { toast(b.dataset.act === "approve" ? "Saved to memory" : "Discarded"); await refresh(true); loadInbox(); } else toast(r.error || "Couldn't do that");
+    });
+  });
+}
+
+/* ---------- refresh ---------- */
+async function refresh(force) {
+  const v = await api("version");
+  if (!force && v === lastVersion) return; lastVersion = v;
+  await loadGraph(); await loadSide();
+  if (currentId && !editing && $("#note").style.display !== "none") { const n = await api("note", currentId); if (n) { const sc = $("#note").scrollTop; await openNote(currentId); $("#note").scrollTop = sc; } }
+}
+new QWebChannel(qt.webChannelTransport, ch => {
+  bridge = ch.objects.bridge; initGraph();
+  bridge.changed.connect(() => refresh(false));
+  refresh(true);
+  bridge.ready && bridge.ready();
+});
+</script>
+</body>
+</html>

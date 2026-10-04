@@ -1,6 +1,6 @@
 """System tray icon and menu.
 
-Items: status, Listen now, Show Vex, Mute microphone, Wake word, Dry run, Open memory (placeholder), Open logs, Quit.
+Items: status, Listen now, Show Vex, Mute microphone, Wake word, Dry run, Open memory, Open logs, Quit.
 Toggles act immediately; "Wake word" is saved to config.toml, the others last for the session. The menu works even if the
 global hotkey could not be registered.
 """
@@ -55,6 +55,7 @@ class TrayController(QObject):
         self.executor = executor
         self.config_path = config_path
         self.on_quit = on_quit
+        self.on_open_memory: Callable[[], None] | None = None       # set by the app: opens the memory viewer window
         self.visible = True
 
         self.tray = QSystemTrayIcon(make_icon(), self)
@@ -72,7 +73,7 @@ class TrayController(QObject):
         self._add("wakeword", "Wake word", self._toggle_wakeword, checked=bool(config.settings["wakeword"]["enabled"]))
         self._add("dry_run", "Dry run (change nothing)", self._toggle_dry_run, checked=bool(executor.dry_run))
         self.menu.addSeparator()
-        self._add("memory", "Open memory (viewer coming soon)", self._open_memory)
+        self._add("memory", "Open memory", self._open_memory)
         self._add("logs", "Open logs", self._open_logs)
         self.menu.addSeparator()
         self._add("quit", "Quit Vex", self._quit)
@@ -160,7 +161,13 @@ class TrayController(QObject):
         self.notify("Dry run", "On: tools only report what they would do." if checked else "Off: tools act for real.")
 
     def _open_memory(self) -> None:
-        self.notify("Memory", "The memory viewer isn't built yet. Opening the notes folder instead.")
+        if self.on_open_memory is not None:
+            try:
+                self.on_open_memory()
+                return
+            except Exception:  # noqa: BLE001
+                log.exception("memory viewer failed")
+                self.notify("Memory", "The memory viewer couldn't open. Opening the notes folder instead.")
         self._open_path(config.ROOT / config.settings["paths"]["vault"])
 
     def _open_logs(self) -> None:

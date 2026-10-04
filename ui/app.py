@@ -176,6 +176,9 @@ def run(on_ready=None, console: bool = False) -> int:
     from ui.speaker import SimulatedSpeaker
     from ui.tray import TrayController
 
+    from PySide6.QtCore import QCoreApplication, Qt
+
+    QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)           # needed once the memory viewer (QtWebEngine) opens
     app = QApplication(sys.argv)
     app.setApplicationName("Vex")
     app.setQuitOnLastWindowClosed(False)
@@ -237,6 +240,17 @@ def run(on_ready=None, console: bool = False) -> int:
 
     tray = TrayController(app, controller, frontend, executor, on_quit=cleanup, hotkey_text=pretty_combo(ui_cfg["hotkey"]))
     holder["tray"] = tray
+
+    def open_viewer() -> None:
+        if "viewer" not in holder:
+            from memory.viewer_service import ViewerService
+            from tools import memory as memory_tools
+            from ui.memory_viewer import MemoryViewerWindow
+
+            holder["viewer"] = MemoryViewerWindow(ViewerService(memory_tools.get_memory()))
+        holder["viewer"].show_and_raise()
+
+    tray.on_open_memory = open_viewer
     hotkey = GlobalHotkey(ui_cfg["hotkey"], controller.start_listening, on_error=tray.notify)
     wake = build_wakeword(controller, stack, tray.notify)
     if wake is not None:
