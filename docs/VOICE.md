@@ -12,10 +12,11 @@ can't be used.
 2. **Whisper** (`voice/stt.py`): Groq `whisper-large-v3-turbo`, English by default. Set `language = ""` in `[voice]` to auto-detect
    (Hindi, Kannada, ...). Seconds of audio are counted per hour in `data/voice_usage.json`; when the allowance is used up, or Groq
    says 429, Vex tells you when it frees up and lets you type instead.
-3. **Speech** (`voice/tts.py`, `voice/speaker.py`): Google Chirp 3 HD if `google-tts-key.json` exists, otherwise edge-tts (free, no
-   key). Sentences are synthesised while the previous one plays. Replies longer than `spoken_max_chars` (280): the first two sentences
-   are spoken, then "The rest is on screen. Say 'read the rest' to hear it." Saying **"read the rest"**, "say the rest" or "read it
-   all" speaks the remainder without asking the LLM.
+3. **Speech** (`voice/tts.py`, `voice/speaker.py`): a ladder of three voices, tried in the order of `[voice] tts_order`: **Google Chirp 3 HD**
+   (needs a key, see below), then **edge-tts** (free, no key), then the **offline Windows voice** (no internet, no key, plainer): so Vex is
+   never silent. Sentences are synthesised while the previous one plays. Replies longer than `spoken_max_chars` (280): the first two
+   sentences are spoken, then "The rest is on screen. Say 'read the rest' to hear it." Saying **"read the rest"**, "say the rest" or
+   "read it all" speaks the remainder without asking the LLM.
 4. **Barge-in**: press the hotkey while Vex speaks: speech stops at once and it listens.
 
 ## Confirmations by voice
@@ -26,15 +27,49 @@ can't be used.
   rejects a voice answer to them as a second lock.
 - Turn it off with `confirm_by_voice = false`.
 
-## Google Cloud TTS (later, when you have the key)
-1. Use the Google project **with billing** (not the AI Studio project) and set a budget alert.
-2. Enable "Cloud Text-to-Speech API", create a service account, download its JSON key.
-3. Save it as `google-tts-key.json` in the Vex folder (it is git-ignored). Restart Vex.
+## Google Chirp 3 HD (your original voice choice)
+**Free tier:** Chirp 3 HD includes **1,000,000 characters per month free**, then about $30 per million (check Google's pricing page, it can
+change). Vex speaks at most two sentences of up to 280 characters per reply, so a month is thousands of replies. Google counts the characters
+of the text it speaks. Billing must be enabled on the project even to use the free allowance.
 
-Vex then uses Chirp 3 HD first, counts characters per month (`data/voice_usage.json`), and switches to edge-tts at 90% of
-`tts_monthly_free_chars` (check the current free allowance in your Google console) or on any error. The configured voice name is
-checked against Google's voice list on first use; a wrong name falls back to edge-tts with a log message listing valid voices.
-Built and tested with a fake Google client; it has not been run against the real service yet.
+**Get a key** (use a *separate* project from the Gemini key: billing on the Gemini project would end its free tier):
+1. console.cloud.google.com > create a new project (for example "vex-tts").
+2. Billing: link a billing account, then Billing > Budgets & alerts > create a budget of about $1 with alerts at 50%, 90%, 100%.
+   (A budget alert only emails you; it does not stop charges. Vex's own counter below is the first line of defence.)
+3. APIs & Services > Library > "Cloud Text-to-Speech API" > Enable.
+4. Credentials, either:
+   - **API key** (simplest): APIs & Services > Credentials > Create credentials > API key > Restrict key > API restrictions > *Cloud
+     Text-to-Speech API* only. Put it in `.env` (git-ignored) as `GOOGLE_TTS_API_KEY=...`.
+   - **Service account:** IAM & Admin > Service accounts > create > Keys > Add key > JSON. Save it as `google-tts-key.json` in the Vex
+     folder (git-ignored). Used only when no API key is set.
+5. Restart Vex. The key is never written to the repo or the logs (the API key travels in a request header, not in the URL).
+
+**What happens when things go wrong** (a failure never leaves Vex silent):
+| Situation | Behaviour |
+|---|---|
+| no key | edge-tts, nothing counted |
+| network blip / 5xx | next voice now; Google is tried again after a minute |
+| quota or billing error (HTTP 429, "quota exceeded") | next voice for an hour (`tts_quota_pause_seconds`); one tray message |
+| key rejected, API not enabled, billing off (400/401/403) | Google switched off for this session; one tray message saying what to check |
+| edge-tts offline too | the Windows voice speaks (offline) |
+| all three fail | the text is shown on screen only |
+
+**Staying inside the free tier:** characters are counted per month in `data/voice_usage.json`. Vex warns in the tray at **75%** and **90%**
+(`tts_warn_fractions`, once each per month, not repeated after a restart) and switches to edge-tts at 90% (`tts_switch_fraction`), or earlier
+if a sentence would pass the limit. A new month starts from zero. This is a local count: your Google budget alert remains the real backstop.
+`python tools_dev/tts_voices.py --usage` shows the numbers.
+
+**Choose the voice:** `google_voice` in `[voice]` (default `en-US-Chirp3-HD-Aoede`). To hear the candidates (`google_candidates`: Aoede, Puck,
+Charon, Kore, Fenrir, Leda, Orus, Zephyr):
+```
+python tools_dev/tts_voices.py                  # one sentence in each (about 60 characters each, counted like normal speech)
+python tools_dev/tts_voices.py --voices Kore    # just one
+python tools_dev/tts_voices.py --edge           # also the edge-tts and Windows voices
+python tools_dev/tts_voices.py --list           # every Chirp 3 HD voice Google offers
+python tools_dev/tts_voices.py --set Kore       # save your pick in config.toml, then restart Vex
+```
+The configured name is checked against Google's list on first use; a wrong name falls back to edge-tts with a message listing valid voices.
+Built and tested with the network mocked (no real Google call has been made yet): your first real test is `tts_voices.py`.
 
 ## Troubleshooting
 - `python tools_dev/mic_check.py` (add `--transcribe` to see what Whisper gets): shows levels, whether speech was detected, and

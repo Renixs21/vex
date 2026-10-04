@@ -13,7 +13,7 @@ from voice.confirm import VoiceConfirmer
 from voice.recorder import Recorder
 from voice.speaker import VoiceSpeaker
 from voice.stt import GroqWhisper
-from voice.tts import EdgeTTS, GoogleTTS, TTSChain
+from voice.tts import EdgeTTS, GoogleTTS, TTSChain, WindowsTTS
 from voice.usage import UsageStore
 
 
@@ -48,10 +48,16 @@ def build_voice(cfg: dict | None = None, root: Path | None = None, on_level: Cal
     stt = GroqWhisper(api_key=config.env("GROQ_API_KEY"), model=cfg["stt_model"], language=cfg["language"],
                       prompt=cfg.get("stt_prompt", ""), usage=usage, seconds_per_hour=cfg["stt_seconds_per_hour"])
     key = root / config.env("GOOGLE_APPLICATION_CREDENTIALS", "google-tts-key.json")
-    makers = {"google": lambda: GoogleTTS(cfg["google_voice"], cfg["google_language"], credentials=key),
-              "edge": lambda: EdgeTTS(cfg["edge_voice"])}
+    makers = {"google": lambda: GoogleTTS(cfg["google_voice"], cfg["google_language"], credentials=key,
+                                          api_key=config.env("GOOGLE_TTS_API_KEY")),
+              "edge": lambda: EdgeTTS(cfg["edge_voice"]),
+              "windows": lambda: WindowsTTS(cfg.get("windows_voice", ""))}
     providers = [makers[n]() for n in cfg["tts_order"] if n in makers] or [EdgeTTS(cfg["edge_voice"])]
-    chain = TTSChain(providers, usage, monthly_limit=cfg["tts_monthly_free_chars"], switch_fraction=cfg["tts_switch_fraction"])
+    if not any(p.name == "windows" for p in providers):          # whatever the order says, the offline voice is the last resort
+        providers.append(WindowsTTS(cfg.get("windows_voice", "")))
+    chain = TTSChain(providers, usage, monthly_limit=cfg["tts_monthly_free_chars"], switch_fraction=cfg["tts_switch_fraction"],
+                     notify=notify, warn_fractions=tuple(cfg.get("tts_warn_fractions", (0.75, 0.9))),
+                     quota_pause=float(cfg.get("tts_quota_pause_seconds", 3600)))
     player = SoundDevicePlayer(device=cfg["output_device"] or None)
     speaker = VoiceSpeaker(chain, player, max_chars=cfg["spoken_max_chars"], max_sentences=cfg["spoken_sentences"])
     capture = VoiceCapture(recorder, stt, fallback=typed_fallback, notify=notify)

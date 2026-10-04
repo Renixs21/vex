@@ -63,7 +63,11 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "language": "en",                # "" = let Whisper detect the language (Hindi, Kannada...)
         "stt_prompt": "Hey Vex. Vex, open Notepad. Hey Vex, set the volume.",
         "stt_seconds_per_hour": 7200,    # Groq's free Whisper allowance; checked locally so we fail to typing early
-        "tts_order": ["google", "edge"],
+        "tts_order": ["google", "edge", "windows"],   # Chirp, then edge-tts, then the offline Windows voice: never silent
+        "google_candidates": ["Aoede", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Zephyr"],   # tools_dev/tts_voices.py
+        "tts_warn_fractions": [0.75, 0.9],   # tray warnings at these shares of the free allowance
+        "tts_quota_pause_seconds": 3600,     # after a quota/billing error, skip Google for this long
+        "windows_voice": "",                 # blank = the Windows default voice
         "google_voice": "en-US-Chirp3-HD-Aoede",
         "google_language": "en-US",
         "edge_voice": "en-US-AriaNeural",

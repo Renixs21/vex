@@ -68,7 +68,12 @@ vad_aggressiveness = 2                 # 0-3, higher filters more background noi
 stt_model = "whisper-large-v3-turbo"
 language = "en"                        # "" = let Whisper detect the language (Hindi, Kannada...)
 stt_seconds_per_hour = 7200            # Groq's free Whisper allowance; tracked locally so Vex falls back to typing early
-tts_order = ["google", "edge"]         # Google needs google-tts-key.json; without it edge-tts is used
+tts_order = ["google", "edge", "windows"]   # Chirp first; edge-tts if Google has no key, hits its limit or fails; the offline Windows voice last
+# Google key: GOOGLE_TTS_API_KEY in .env (an API key restricted to the Text-to-Speech API) or a service-account file google-tts-key.json
+google_candidates = ["Aoede", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Zephyr"]   # python tools_dev/tts_voices.py speaks each one
+tts_warn_fractions = [0.75, 0.9]       # tray warnings at these shares of the free allowance
+tts_quota_pause_seconds = 3600         # after a quota/billing error, skip Google for this long
+windows_voice = ""                     # blank = the Windows default voice
 google_voice = "en-US-Chirp3-HD-Aoede"
 google_language = "en-US"
 edge_voice = "en-US-AriaNeural"

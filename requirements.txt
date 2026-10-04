@@ -9,6 +9,7 @@ python-dotenv           # loads .env
 # --- Voice ---
 google-cloud-texttospeech   # Google Cloud TTS (Chirp 3 HD)
 edge-tts                    # free TTS fallback
+httpx                       # Google TTS over REST (API-key mode); also pulled in by the Groq client
 sounddevice                 # mic recording
 soundfile                   # write WAV for STT
 numpy
