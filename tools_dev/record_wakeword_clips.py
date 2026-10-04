@@ -58,6 +58,7 @@ def main() -> int:
     ap.add_argument("--only", choices=list(CATEGORIES), nargs="*", help="only these categories")
     ap.add_argument("--out", default=str(Path.home() / "wakeword_train" / "real"))
     ap.add_argument("--device", default=None, help="input device index or part of its name")
+    ap.add_argument("--more", type=int, default=0, help="record this many MORE clips in each chosen category, on top of what exists")
     ap.add_argument("--list-devices", action="store_true")
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
@@ -84,6 +85,8 @@ def main() -> int:
         secs, count = spec[0], spec[1 + idx]
         folder = out / name
         have = len(list(folder.glob("*.wav"))) if folder.exists() else 0
+        if args.more:
+            count = have + args.more
         if have >= count:
             print(f"[{name}] already has {have}/{count} clips, skipping")
             continue
