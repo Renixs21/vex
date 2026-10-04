@@ -157,7 +157,7 @@ class Curator:
     def __init__(self, memory: Memory, llm: Any | None = None, *, idle_seconds: float = 120.0, min_words: int = 6,
                  max_attempts: int = 6, queue_path: Path | None = None, log_path: Path | None = None,
                  is_busy: Callable[[], bool] | None = None, clock: Callable[[], float] = time.time,
-                 llm_factory: Callable[[], Any] | None = None):
+                 llm_factory: Callable[[], Any] | None = None, vault_full: Callable[[], bool] | None = None):
         self.memory = memory
         self._llm = llm
         self._llm_factory = llm_factory
@@ -167,6 +167,8 @@ class Curator:
         self.queue_path = queue_path or (memory.vault.root / ".vexmind" / "curator_queue.json")
         self.log_path = log_path or (Path(__file__).resolve().parent.parent / "logs" / "curator.jsonl")
         self.is_busy = is_busy or (lambda: False)
+        self.vault_full = vault_full or (lambda: False)          # the vault's soft cap: automatic entries pause, conversations stay queued
+        self._paused_logged = False
         self._clock = clock
         self._lock = threading.RLock()
         self._wake = threading.Event()
@@ -229,6 +231,8 @@ class Curator:
     # ---- processing -----------------------------------------------------------------------------------------------
     def run_pending(self, force_close: bool = False) -> int:
         """Process every closed conversation that is due. Returns how many were finished. Never raises."""
+        if self._vault_over_cap():
+            return 0
         self._close_idle(force_close)
         done = 0
         while not self._stop.is_set():
@@ -240,6 +244,20 @@ class Curator:
             if self._process(conv):
                 done += 1
         return done
+
+    def _vault_over_cap(self) -> bool:
+        try:
+            full = bool(self.vault_full())
+        except Exception:  # noqa: BLE001
+            return False
+        if full and not self._paused_logged:
+            self._paused_logged = True
+            log.warning("curator paused: the vault is over its soft cap; conversations stay queued until there is room")
+            self._audit({"event": "paused", "reason": "vault over its soft cap; nothing saved automatically, conversations kept queued"})
+        elif not full and self._paused_logged:
+            self._paused_logged = False
+            log.info("curator resumed: the vault is under its soft cap again")
+        return full
 
     def _client(self):
         if self._llm is None and self._llm_factory is not None:

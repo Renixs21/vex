@@ -202,7 +202,7 @@ def startup_summary(parts: dict, hotkey_text: str, console: bool) -> list[str]:
     return lines
 
 
-def build_curator(controller):
+def build_curator(controller, vault_full=None):
     """The memory curator (saves durable facts after a conversation), or None if it is off or can't start. Never raises."""
     import config
 
@@ -217,7 +217,7 @@ def build_curator(controller):
         cur = Curator(memory_tools.get_memory(), llm_factory=lambda: build_client(order=cfg["curator_order"]),
                       idle_seconds=float(cfg["curator_idle_seconds"]), min_words=int(cfg["curator_min_words"]),
                       max_attempts=int(cfg["curator_max_attempts"]), log_path=config.ROOT / config.settings["paths"]["logs"] / "curator.jsonl",
-                      is_busy=lambda: controller.state != "idle")
+                      is_busy=lambda: controller.state != "idle", vault_full=vault_full)
         controller.on_turn.append(cur.add_turn)
         controller.on_interaction_end.append(cur.interaction_ended)
         cur.start()
@@ -323,10 +323,16 @@ def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: in
 
     controller.chime = play_reminder_chime
     reminders.set_announcer(controller.announce)             # a reminder is spoken (chime, orb, voice), not just a toast
-    curator = build_curator(controller)
+    from ui.housekeeping import Housekeeper
+
+    housekeeper = Housekeeper(config.ROOT, config.ROOT / config.settings["paths"]["logs"], config.ROOT / config.settings["paths"]["vault"],
+                              notify=notify)
+    housekeeper.start()                                      # 2 minutes after start, then daily: logs, archives, backups, vault cap
+    curator = build_curator(controller, vault_full=housekeeper.vault_full)
     consolidator = build_consolidator(controller)
 
     def cleanup() -> None:
+        housekeeper.stop()
         if curator is not None:
             curator.stop()
         if consolidator is not None:

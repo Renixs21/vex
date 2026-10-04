@@ -34,3 +34,4 @@ Say "Hey Jarvis" (the built-in fallback) or, once you've trained it, "Hey Vex": 
 
 Starting with Windows, crash recovery, the mute icon: see `docs/STARTUP.md`.
 Health check (is every part working?): `python tools_dev\health.py` or tray > Health check; see `docs/HEALTH.md`.
+Housekeeping (log rotation, archives, backup caps, the 200 MB vault soft cap; never your notes): see `docs/HOUSEKEEPING.md`.
