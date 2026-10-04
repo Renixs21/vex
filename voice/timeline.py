@@ -71,6 +71,13 @@ class Timeline:
             if self._turn is not None:
                 self._turn["data"].update(data)
 
+    def confirm_wait(self, seconds: float) -> None:
+        """Time spent waiting for YOUR answer to a confirmation: reported as its own stage, taken out of 'brain' and 'total'."""
+        with self._lock:
+            if self._turn is not None:
+                d = self._turn["data"]
+                d["confirm_wait"] = round(d.get("confirm_wait", 0.0) + max(0.0, seconds), 3)
+
     def llm(self, provider: str, seconds: float, tools: int, prompt_tokens: int | None = None, ok: bool = True) -> None:
         with self._lock:
             if self._turn is not None:
@@ -129,6 +136,14 @@ def summarize(turn: dict, outcome: str) -> dict:
             g2 = _gap(m, "trigger", "first_audio")
             if g2 is not None:
                 stages["total"] = g2
+    cw = float(turn["data"].get("confirm_wait") or 0.0)
+    if cw > 0:                                                       # your thinking time is not Vex's latency
+        stages["confirm_wait"] = round(cw, 3)
+        if "brain" in stages:
+            stages["brain"] = round(max(0.0, stages["brain"] - cw), 3)
+        if "total" in stages:
+            stages["total_wall"] = stages["total"]
+            stages["total"] = round(max(0.0, stages["total"] - cw), 3)
     rec = {"source": turn["source"], "outcome": outcome, "stages": stages, "llm": turn["llm"], "tools": turn["tools"], **turn["data"]}
     rec["llm_calls"] = len(turn["llm"])
     return rec
@@ -136,7 +151,7 @@ def summarize(turn: dict, outcome: str) -> dict:
 
 def describe(rec: dict) -> str:
     s = rec.get("stages", {})
-    parts = [f"{k}={s[k]:.2f}s" for k in ("trigger_to_record", "endpoint_wait", "stt", "brain", "tts_first_audio") if k in s]
+    parts = [f"{k}={s[k]:.2f}s" for k in ("trigger_to_record", "endpoint_wait", "stt", "brain", "confirm_wait", "tts_first_audio") if k in s]
     llm = ", ".join(f"{c['provider']} {c['seconds']:.2f}s/{c['tools']} tools" for c in rec.get("llm", []))
     return (f"[{rec.get('source')}/{rec.get('outcome')}] " + " ".join(parts) + (f" | total={s['total']:.2f}s" if "total" in s else "")
             + (f" | llm: {llm}" if llm else "") + (" | RESUMED after pause" if rec.get("resumed") else ""))

@@ -146,7 +146,7 @@ def test_no_window_after_no_speech():
 
 
 def test_no_window_after_an_error():
-    c, cap, *_ = make("x", agent=FakeAgent(fail=True))
+    c, cap, *_ = make("open notepad", agent=FakeAgent(fail=True))   # ("x" alone is now a bare wake word: greeted)
     c.start_listening("hotkey")
     c.wait_idle()
     assert cap.windows == []

@@ -138,7 +138,9 @@ class Executor:
     # ------------------------------------------------------------------------------------------------------------
     def _ask(self, req) -> Confirmation:
         try:
+            t_ask = time.monotonic()
             answer = self.confirmer.confirm(req)
+            timeline.confirm_wait(time.monotonic() - t_ask)         # your answer time, kept out of the "brain" latency
         except KeyboardInterrupt:
             return Confirmation(False, "none", "interrupted")
         except Exception:  # noqa: BLE001 - a broken confirmer must fail closed

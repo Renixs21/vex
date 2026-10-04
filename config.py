@@ -29,7 +29,8 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "groq_reasoning_effort": "low",   # gpt-oss models only: low = short thinking, none leaked into replies
         "max_steps": 8,
         "failover_attempts": 2,      # tries per provider on 429/5xx before switching
-        "failover_cooldown": 300,    # seconds to stay on the fallback before trying the primary again
+        "failover_cooldown": 300,
+        "first_response_deadline_s": 4.0,   # a model that hasn't answered by then is abandoned for the next one in the ladder (0 = off)    # seconds to stay on the fallback before trying the primary again
     },
     "safety": {"extra_safe_folders": [], "confirm_timeout": 30, "typed_timeout": 60},
     "paths": {"vault": "VexVault", "logs": "logs"},
@@ -68,7 +69,9 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "followup_min_speech_ms": 250,       # voiced audio needed to count as speech in the window (stricter than a normal turn)
         "followup_delay_ms": 300,
         "wake_greeting": "What can I do for you?",   # spoken after a bare "Hey Vex" ("" = say nothing)
-        "wake_wait_s": 3.0,                  # after "Hey Vex", wait this long for the command before greeting            # the window opens this long after Vex's voice has fully stopped (its own echo)          # give up if nothing is said for this long
+        "wake_wait_s": 3.0,
+        "filler_text": "One sec…",          # said once when the brain takes longer than filler_after_s
+        "filler_after_s": 2.5,              # 0 = never                  # after "Hey Vex", wait this long for the command before greeting            # the window opens this long after Vex's voice has fully stopped (its own echo)          # give up if nothing is said for this long
         "vad_aggressiveness": 2,         # 0-3, higher filters more noise
         "preroll_ms": 500,
         "stt_model": "whisper-large-v3-turbo",

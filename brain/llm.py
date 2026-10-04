@@ -320,15 +320,20 @@ class EmptyReply(Exception):
     """The model answered with nothing: no text and no tool call."""
 
 
+class ProviderTimeout(Exception):
+    """A provider didn't answer within the first-response deadline."""
+
+
 class FallbackClient:
-    """Try each client in order; move on when one fails.
+    """Try each client in order; move on when one fails, or (with `deadline`) when one hasn't answered within `deadline` seconds.
 
     `resp.raw` is returned as (provider_name, raw) so the agent can replay it only to the same provider.
     """
 
     name = "fallback"
 
-    def __init__(self, clients: list[LLMClient], cooldown: float = 300.0, clock=time.monotonic):
+    def __init__(self, clients: list[LLMClient], cooldown: float = 300.0, clock=time.monotonic, deadline: float | None = None,
+                 timeout_cooldown: float = 60.0):
         if not clients:
             raise RuntimeError("No LLM configured. Add GROQ_API_KEY and/or GEMINI_API_KEY to .env.")
         self.clients = clients
@@ -337,6 +342,9 @@ class FallbackClient:
         self._off_until: dict[str, float] = {}      # provider name -> time before which we don't try it first
         self.stats: list[dict] = []                 # one record per successful request: provider, tokens, tools, seconds
         self.prefer: str | None = None              # try this provider first (set per message by the agent's router)
+        self.deadline = deadline if deadline and deadline > 0 else None     # seconds a provider gets before the next one is tried
+        self.timeout_cooldown = timeout_cooldown    # a provider that timed out isn't tried first for this long
+        self.last_answer: tuple[str, str] | None = None                  # (provider, why) of the latest successful request
 
     def _order(self) -> list[LLMClient]:
         """Providers in preference order, with any that are cooling down moved to the end (last resort)."""
@@ -351,14 +359,39 @@ class FallbackClient:
             ready.sort(key=lambda c: c.name != self.prefer)           # stable: everything else keeps its order
         return ready + cooling
 
+    def _call(self, c: LLMClient, system: str, messages: list[dict], tools: list[Tool], deadline: float | None) -> LLMResponse:
+        """One provider call; with a deadline it runs on a helper thread and is abandoned (its answer ignored) when time runs out.
+        The HTTP request can't be cancelled from outside, so it may still finish in the background and count against that
+        provider's own rate limit, never the next provider's."""
+        if deadline is None:
+            return c.generate(system, messages, tools)
+        box: dict = {}
+
+        def run() -> None:
+            try:
+                box["resp"] = c.generate(system, messages, tools)
+            except BaseException as e:  # noqa: BLE001
+                box["err"] = e
+
+        t = threading.Thread(target=run, name=f"llm-{c.name}", daemon=True)
+        t.start()
+        t.join(deadline)
+        if t.is_alive():
+            raise ProviderTimeout(f"{c.name} didn't answer within {deadline:.1f} s")
+        if "err" in box:
+            raise box["err"]
+        return box["resp"]
+
     def generate(self, system: str, messages: list[dict], tools: list[Tool]) -> LLMResponse:
         last: Exception | None = None
         order = self._order()
         first_step = bool(messages) and messages[-1]["role"] == "user"
+        why = "first choice"
         for i, c in enumerate(order):
             try:
                 t0 = self._clock()
-                resp = c.generate(system, messages, tools)
+                has_next = i + 1 < len(order)
+                resp = self._call(c, system, messages, tools, self.deadline if has_next else None)
                 if first_step and not resp.text.strip() and not resp.tool_calls:
                     raise EmptyReply(f"{c.name} returned an empty reply")
                 if resp.raw is not None:
@@ -367,12 +400,21 @@ class FallbackClient:
                 self.stats.append({"provider": c.name, "prompt": u.get("prompt"), "completion": u.get("completion"),
                                    "tools": len(tools), "seconds": self._clock() - t0})
                 timeline.llm(c.name, self._clock() - t0, len(tools), u.get("prompt"))
+                self.last_answer = (c.name, why)
+                timeline.set(llm_answered_by=c.name, llm_why=why)
+                log.info("LLM answered by %s (%s)", c.name, why)
                 return resp
             except Exception as e:  # noqa: BLE001
                 last = e
                 timeline.llm(c.name, self._clock() - t0, len(tools), ok=False)
                 nxt = order[i + 1] if i + 1 < len(order) else None
-                if _provider_down(e) and nxt is not None:
+                why = (f"{c.name} timed out after {self.deadline:.1f} s" if isinstance(e, ProviderTimeout)
+                       else f"{c.name} failed: {_short(e)}")
+                if isinstance(e, ProviderTimeout) and nxt is not None:
+                    self._off_until[c.name] = self._clock() + self.timeout_cooldown
+                    log.warning("LLM switch: %s -> %s (no answer within %.1f s). Trying %s first again in %d s.",
+                                c.name, nxt.name, self.deadline, c.name, self.timeout_cooldown)
+                elif _provider_down(e) and nxt is not None:
                     wait = min(MAX_COOLDOWN, max(self.cooldown, retry_after(e) or 0.0))
                     self._off_until[c.name] = self._clock() + wait
                     log.warning("LLM switch: %s -> %s (%s). Staying on %s for %d s before trying %s again.",
@@ -417,4 +459,4 @@ def build_client(order: list[str] | None = None) -> FallbackClient:
     for name, cls, model, key, rpm in wanted:
         extra = {"reasoning_effort": cfg["groq_reasoning_effort"], "name": name} if cls is GroqClient else {}
         clients.append(cls(model, key, rpm, attempts, fail_over_after, **extra))
-    return FallbackClient(clients, cooldown=cfg["failover_cooldown"])
+    return FallbackClient(clients, cooldown=cfg["failover_cooldown"], deadline=float(cfg.get("first_response_deadline_s", 4.0)))

@@ -35,7 +35,7 @@ def stt_extra(rows: list[dict]) -> dict:
     return out
 
 
-STAGES = ("trigger_to_record", "endpoint_wait", "stt", "brain", "tts_first_audio", "total")
+STAGES = ("trigger_to_record", "endpoint_wait", "stt", "brain", "confirm_wait", "tts_first_audio", "total")
 
 
 def load(path: Path, since: datetime | None = None) -> list[dict]:
@@ -138,6 +138,12 @@ def print_report(rows: list[dict]) -> None:
             notes.append(f"RESUMED after a {r.get('resume_gap', 0):.2f}s pause")
         if r.get("llm_calls", 0) > 1:
             notes.append(f"{r['llm_calls']} model calls")
+        if s.get("confirm_wait"):
+            notes.append(f"you took {s['confirm_wait']:.1f}s to answer a confirmation (not counted)")
+        if r.get("llm_answered_by") and r.get("llm_why", "first choice") != "first choice":
+            notes.append(f"answered by {r['llm_answered_by']} ({r['llm_why']})")
+        if r.get("filler"):
+            notes.append("said 'One sec'")
         if r.get("stt_fallback"):
             notes.append("backup STT used")
         if (r.get("stt_attempts") or 1) > 1:

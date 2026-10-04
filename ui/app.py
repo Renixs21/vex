@@ -320,6 +320,8 @@ def run(on_ready=None, console: bool = False, quiet: bool = False, restarted: in
     controller.followup_delay_s = float(voice_cfg.get("followup_delay_ms", 300)) / 1000
     controller.wake_greeting = str(voice_cfg.get("wake_greeting", "What can I do for you?"))
     controller.wake_wait_s = float(voice_cfg.get("wake_wait_s", 3.0))
+    controller.filler_text = str(voice_cfg.get("filler_text", "One sec…"))
+    controller.filler_after_s = float(voice_cfg.get("filler_after_s", 2.5))
     timeline.configure(config.ROOT / config.settings["paths"]["logs"] / "latency.jsonl")
     from voice.chime import play_reminder_chime
 

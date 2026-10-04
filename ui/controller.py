@@ -33,7 +33,7 @@ _READ_REST = re.compile(
     r"continue\s+reading)(?:\s+(?:out|aloud|out\s+loud|to\s+me))?$")
 
 
-from voice.wakeword import strip_wake_phrase  # noqa: E402
+from voice.wakeword import is_bare_wake, strip_wake_phrase  # noqa: E402
 
 _SLEEP = re.compile(r"^(?:please\s+)?(?:go\s+(?:back\s+)?to\s+sleep|go\s+to\s+the\s+edge|sleep(?:\s+now|\s+mode)?|"
                     r"(?:you\s+can\s+)?(?:dock|hide|minimi[sz]e)(?:\s+(?:now|yourself))?|that(?:'|\s)?s\s+all|"
@@ -162,6 +162,8 @@ class VexController:
         # a bare "Hey Vex" (nothing after it): Vex says the greeting and listens for the command (the follow-up window)
         self.wake_greeting = "What can I do for you?"
         self.wake_wait_s = 3.0                                    # after the wake word, how long to wait for a command before greeting
+        self.filler_text = "One sec…"                             # said when the brain takes longer than filler_after_s (0 = never)
+        self.filler_after_s = 0.0
         self._source = ""
 
     # ---- triggers ----------------------------------------------------------------------------------------------------
@@ -412,7 +414,7 @@ class VexController:
                     text = strip_wake_phrase(text)                       # "Hey Vex, and the weather?" works too
                     if text != raw.strip():
                         log.info("wake phrase in transcript: %r -> %r", raw, text)
-                    if not text.strip() and self.wake_greeting and not self._barge_in:
+                    if is_bare_wake(raw) and self.wake_greeting and not self._barge_in:
                         outcome = self._greet()                          # a bare "Hey Vex" in the window: greet, listen again
                         return
             elif mode == "text":
@@ -422,12 +424,16 @@ class VexController:
                 self._active_capture = self.typed_capture if mode == "typed" else self.capture
                 after_wake = mode == "listen" and self._source == "wakeword" and hasattr(self._active_capture, "after_wake")
                 text = self._active_capture.after_wake(self.wake_wait_s) if after_wake else self._active_capture()
+                bare = False
                 if text and mode != "typed":
                     raw = text
                     text = strip_wake_phrase(text)                       # "Hey Vex, open notepad" -> "open notepad"
                     if text != raw.strip():
                         log.info("wake phrase in transcript: %r -> %r", raw, text)
-                if (self._source == "wakeword" and mode == "listen" and not (text or "").strip() and not self._shutdown
+                    bare = is_bare_wake(raw)                             # "Hey Vex. Um." / "hey vix, are you there?"
+                    if bare:
+                        log.info("only the wake phrase (and filler) in %r: a greeting, not a command", raw)
+                if ((bare or (self._source == "wakeword" and mode == "listen" and not (text or "").strip())) and not self._shutdown
                         and not self._barge_in and not self.mic_muted and self.wake_greeting):
                     outcome = self._greet()                          # a bare "Hey Vex": answer it out loud, then listen
                     return
@@ -453,7 +459,12 @@ class VexController:
             sleep_tool = _sleep_tool()
             if sleep_tool is not None:
                 sleep_tool.clear_sleep_request()
-            reply = self.agent.run(text)
+            filler = self._start_filler()
+            try:
+                reply = self.agent.run(text)
+            finally:
+                if filler is not None:
+                    filler.cancel()
             timeline.mark("brain_end")
             if sleep_tool is not None and sleep_tool.take_sleep_request() and not self._barge_in:
                 outcome = "sleep"                                    # the brain called go_to_sleep: same ending as the fast path
@@ -489,6 +500,28 @@ class VexController:
             self._last_outcome = outcome
             timeline.set(followup=mode == "followup")
             timeline.finish(outcome)
+
+    def _start_filler(self) -> threading.Timer | None:
+        """If the brain is still busy after filler_after_s, say "One sec…" once so you're never left in silence. Not after a
+        confirmation question was asked (that is speech already), not after a barge-in."""
+        if not self.filler_after_s or not self.filler_text:
+            return None
+
+        def say() -> None:
+            if self.state != THINKING or self._barge_in or self._confirm_asked or self._shutdown:
+                return
+            log.info("brain is slow (> %.1f s): saying %r", self.filler_after_s, self.filler_text)
+            timeline.set(filler=True)
+            try:
+                say_fn = getattr(self.speaker, "say", None) or self.speaker.speak
+                say_fn(self.filler_text, lambda v: None)
+            except Exception:  # noqa: BLE001 - a filler that can't be said is no loss
+                log.debug("filler failed", exc_info=True)
+
+        t = threading.Timer(self.filler_after_s, say)
+        t.daemon = True
+        t.start()
+        return t
 
     def _greet(self) -> str:
         """The spoken answer to a bare wake word. Returns the turn outcome ('greeted' opens the follow-up window for the command)."""

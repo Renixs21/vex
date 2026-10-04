@@ -89,6 +89,7 @@ class VoiceSpeaker:
         self._sleep = sleep
         self._cancel: threading.Event | None = None
         self._remaining = ""
+        self._one_voice = threading.Lock()                         # a filler, a confirmation question and the reply never overlap
 
     @property
     def has_remaining(self) -> bool:
@@ -130,6 +131,10 @@ class VoiceSpeaker:
     # ---- pipeline -------------------------------------------------------------------------------------------------------------
     def _play(self, chunks: list[str], on_level: Callable[[float], None], first_word: bool = False) -> None:
         """`first_word`: this is a reply (not a confirmation question), so its first sound ends the latency stopwatch."""
+        with self._one_voice:
+            self._play_locked(chunks, on_level, first_word)
+
+    def _play_locked(self, chunks: list[str], on_level: Callable[[float], None], first_word: bool = False) -> None:
         if not chunks:
             log.info("tts skipped: nothing to say (empty text)")
             return

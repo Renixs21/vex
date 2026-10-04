@@ -158,3 +158,21 @@ Why this was needed: after a reply only the wake-word scorer was re-armed (`on_i
 * The startup quiet mode only holds back toasts. It never silences a reply, the greeting or anything you triggered.
 * **Every reply explains itself in `logs\vex.log`**: `tts played: …`, `tts cancelled: …` (barge-in / quit), or `tts skipped: …` (empty
   reply, interrupted while thinking, speech failed before any sound).
+
+## A slow brain, and confirmation time
+* **Deadline** (`[llm] first_response_deadline_s = 4.0`): a model that hasn't answered within 4 s is abandoned and the next one in the
+  ladder is asked; the slow one isn't tried first again for 60 s. The last model in the ladder always gets the time it needs. (An
+  abandoned request can't be cancelled over HTTP: it may still finish in the background and count against that model's own limit.)
+  `vex.log` says who answered and why: `LLM answered by groq-small (groq timed out after 4.0 s)`; `latency.jsonl` has
+  `llm_answered_by` / `llm_why`, and the report notes it.
+* **"One sec…"** (`[voice] filler_text`, `filler_after_s = 2.5`, 0 = never): said once when the brain is still busy after 2.5 s, never after a
+  confirmation question was asked. Only one voice at a time: the filler, a confirmation question and the reply never overlap.
+* **Your confirmation time is not latency**: the time you take to answer "Should I…?" is recorded as `confirm_wait` and taken out of
+  `brain` and `total` (`total_wall` keeps the clock time). Example: the 14.3 s "brain" on 2026-10-04 18:39 was 2.6 s of models and
+  11.7 s of a red-tier `run_powershell` confirmation that you declined.
+
+## "Hey Vex" heard inside the command
+Leading wake-word variants are stripped from the transcript, repeated ones too: "Hey Vex", "hey vix", "hey vax", "a vex", "Vex",
+"Hey Vics", "X", "Havix", "Hey Vex. Hey Vex, play jazz" -> "play jazz". If nothing but filler is left ("um", "okay", "are you there"),
+it is a greeting, not a command: Vex says "What can I do for you?" and listens. Words that only look similar ("vexed", "next", "text",
+"vest") are left alone.

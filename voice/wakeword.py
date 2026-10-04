@@ -72,7 +72,12 @@ def play_chime(sd_module=None, blocking: bool = True) -> None:
 
 # Whisper hears "Vex" as many things: "x", "ex", "vecs", "wex", "backs", "Have x", "Havix"...
 GREETINGS = {"hey", "hi", "ok", "okay", "hay", "hei", "a", "eh", "he", "hate", "have", "ay"}
-WAKE_VARIANTS = {"vex", "x", "ex", "vecs", "vecks", "wex", "backs", "becks", "vax", "vix", "vexx", "vexs", "vez", "jarvis", "vegs", "veks"}
+WAKE_VARIANTS = {"vex", "x", "ex", "vecs", "vecks", "wex", "backs", "becks", "vax", "vix", "vexx", "vexs", "vez", "jarvis", "vegs", "veks",
+                 "vics", "vicks", "wix", "weks", "vext"}
+NOT_WAKE = {"vet", "ten", "yes", "web", "fix", "six", "text", "next", "vector", "flex", "vexed", "vexing", "vexes", "vest", "vets"}
+# what may follow a bare "Hey Vex" without it being a command: Vex treats it as a greeting
+FILLER = {"um", "uh", "erm", "er", "ah", "hmm", "mm", "okay", "ok", "so", "yeah", "yes", "yep", "please", "hello", "hi", "hey", "there",
+          "are", "you", "listening", "awake", "vex", "well", "and"}
 FUZZY_RATIO = 0.7
 FUSED = {"havix", "heyvex", "hayvex", "hevex", "heyvecs", "havex", "hayvecs", "heyvecks", "havecs", "heyx", "heyex"}
 
@@ -83,8 +88,8 @@ def _tokens(text: str) -> list[tuple[str, int]]:
 
 
 def _is_wake_word(word: str) -> bool:
-    return word in WAKE_VARIANTS or (len(word) >= 3 and difflib.SequenceMatcher(None, word, "vex").ratio() >= FUZZY_RATIO
-                                     and word not in {"vet", "ten", "yes", "web", "fix", "six", "text", "next", "vector", "flex"})
+    return word in WAKE_VARIANTS or (len(word) >= 3 and word not in NOT_WAKE
+                                     and difflib.SequenceMatcher(None, word, "vex").ratio() >= FUZZY_RATIO)
 
 
 def wake_phrase_end(text: str) -> int:
@@ -102,16 +107,40 @@ def wake_phrase_end(text: str) -> int:
     return 0
 
 
-def strip_wake_phrase(text: str) -> str:
-    """'Hey Vex, open notepad' -> 'open notepad'. Only strips the phrase at the very start, and tolerates how Whisper mishears it."""
-    text = text or ""
+def _strip_once(text: str) -> str:
     end = wake_phrase_end(text)
     if not end:
         return text.strip()
     rest = text[end:]
     if rest[:1].isalnum():                                  # "vexillology": the match was only the start of a longer word
         return text.strip()
-    return rest.lstrip(" 	,.!?:;-").strip()
+    return rest.lstrip(" \t,.!?:;-").strip()
+
+
+def strip_wake_phrase(text: str) -> str:
+    """'Hey Vex, open notepad' -> 'open notepad'. Only strips at the very start (repeated: 'Hey Vex. Hey Vex, play jazz' -> 'play jazz'),
+    and tolerates how Whisper mishears it ('hey vix', 'a vex', 'Have x', 'Havix')."""
+    text = (text or "").strip()
+    for _ in range(3):
+        rest = _strip_once(text)
+        if rest == text:
+            break
+        text = rest
+    return text
+
+
+def is_only_filler(text: str) -> bool:
+    """'', 'um.', 'okay', 'are you there?': nothing a command could be made of."""
+    words = [w for w, _ in _tokens(text)]
+    return all(w in FILLER for w in words)
+
+
+def is_bare_wake(raw: str) -> bool:
+    """The transcript is just the wake phrase (maybe repeated, maybe with 'um' / 'okay' / 'are you there'): a greeting, not a command."""
+    raw = (raw or "").strip()
+    if not raw or not wake_phrase_end(raw):
+        return False
+    return is_only_filler(strip_wake_phrase(raw))
 
 
 def label_for(model: str) -> str:
