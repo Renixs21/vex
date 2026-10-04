@@ -5,6 +5,7 @@ Rectangle {
     id: root
     property var tabs: []
     property int current: 0
+    property int minTab: 88
     signal picked(int index)
     implicitHeight: Theme.touch
     implicitWidth: row.implicitWidth + 8
@@ -27,7 +28,7 @@ Rectangle {
                 required property var modelData
                 required property int index
                 readonly property bool on: index === root.current
-                width: Math.max(88, t.implicitWidth + 32)
+                width: Math.max(root.minTab, t.implicitWidth + 28)
                 height: Theme.touch - 8
                 radius: Theme.buttonRadius
                 border.width: on ? 1 : 0

@@ -199,7 +199,7 @@ def build_api(controller, executor, tray, tracker, dialog, housekeeper, status, 
         from ui.voice_control import VoiceControl
 
         core = ApiCore(controller=controller, executor=executor, tray=tray, memory_factory=memory_tools.get_memory, conversations=conversations,
-                       voice_control=VoiceControl(controller, wake=wake, stack=stack),
+                       voice_control=VoiceControl(controller, wake=wake, stack=stack), restart_fn=tray.restart_vex,
                        dialog_confirmer=dialog, housekeeper=housekeeper, health_fn=health_fn, status_fn=status,
                        hotkey=pretty_combo(config.settings["ui"]["hotkey"]))
         core.attach()

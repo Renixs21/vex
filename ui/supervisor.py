@@ -23,6 +23,7 @@ log = logging.getLogger("vex.supervisor")
 
 EXIT_CLEAN = 0
 EXIT_ALREADY_RUNNING = 3
+EXIT_RESTART = 75                      # Vex asked to be restarted (the Control Center's "Restart Vex"): not a crash
 RESTART_DELAY = 3.0
 
 
@@ -63,8 +64,9 @@ def run(root: Path, logs: Path, startup_delay: float = 0.0, quiet: bool = True, 
         log.info("waiting %.0f s before starting Vex (the desktop is still settling after logon)", startup_delay)
         sleep(startup_delay)
     restarts = 0
+    next_restarted = 0                                     # tells the next child it follows a crash (one "Vex restarted" toast)
     while True:
-        cmd = child_command(root, python, quiet, restarts)
+        cmd = child_command(root, python, quiet, next_restarted)
         log.info("starting Vex: %s", " ".join(cmd))
         try:
             with open(err_path, "ab") as err:
@@ -80,6 +82,11 @@ def run(root: Path, logs: Path, startup_delay: float = 0.0, quiet: bool = True, 
         if code == EXIT_ALREADY_RUNNING:
             log.info("another Vex is already running; supervisor done")
             return 0
+        if code == EXIT_RESTART:
+            log.info("Vex asked to be restarted; starting it again (not counted as a crash)")
+            next_restarted = 0
+            sleep(0.5)
+            continue
         log.warning("Vex ended unexpectedly (exit code %s)", code)
         if not budget.allow():
             vex_log = logs / "vex.log"
@@ -88,6 +95,7 @@ def run(root: Path, logs: Path, startup_delay: float = 0.0, quiet: bool = True, 
                                   "Start it again from the Start menu or: python main.py")
             return 1
         restarts += 1
+        next_restarted = restarts
         sleep(RESTART_DELAY)
 
 

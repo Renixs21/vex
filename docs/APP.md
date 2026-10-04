@@ -21,7 +21,8 @@ window says so, offers **Start Vex** (starts the supervisor quietly), and reconn
 | Conversations | built |
 | Tasks & reminders | built |
 | Voice | built |
-| System & health, Budget | next |
+| System & health | built |
+| Budget | next |
 
 ### Home
 * **Header:** a status chip ("Listening for 'Hey Vex'", "Still listening", "Microphone muted"...), the follow-up window length, and
@@ -89,6 +90,15 @@ anything is stored. Older sessions are dropped when Vex starts and once a day. B
 * **Response time per voice turn:** the last 40 turns, one column each (you stopped talking -> first word), with the median line; hover
   (or focus the chart and use the arrow keys) for a turn's time, how it started and its stages; **Table** shows every number as text.
   (Turns before 2026-10-04 23:00 still include time spent answering confirmations; newer ones don't.)
+
+### System & health
+* **Health:** the free check (`docs/HEALTH.md`): every part with PASS / WARN / FAIL (a word, not just a colour), the detail and what to
+  do. **Run check** takes about 5 s and uses no API quota.
+* **Vex:** version (git commit), Python, pid, and whether the supervisor keeps it running; **Start with Windows**; **Restart Vex**
+  (asks first). Under the supervisor Vex exits with code 75 and is started again at once; that is not counted as a crash and shows no
+  "restarted" toast. Started by hand, the Control Center starts it again itself if it isn't back after 12 s.
+* **Logs:** the last 400 lines of `vex.log`, `supervisor.log`, `housekeeping.log`, the error output and the last health report, with keys
+  and secrets hidden; **Open logs folder**.
 
 ## Look
 Base `#0b0c0e`. Panels: brushed gunmetal (`shaders/panel.frag`: gradient `#1b1d21`->`#141619`, very faint vertical brush lines, 1px

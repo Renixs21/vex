@@ -25,6 +25,7 @@ state. The mute is not remembered across restarts.
 ## Recovery
 | What dies | What happens |
 |---|---|
+| Restart Vex (Control Center) | exit code 75: started again at once, not counted, no toast. |
 | Vex itself (crash, killed) | the supervisor restarts it after 3 s with a "Vex restarted" toast. At most **3 restarts in 10 minutes**; then it stops and shows a toast with the log paths (`logs\vex.log`, `logs\child_stderr.txt`). |
 | Tray > **Quit Vex** (exit code 0) | never restarted. |
 | A second Vex while one runs | the second exits (code 3); the supervisor does not treat it as a crash. |

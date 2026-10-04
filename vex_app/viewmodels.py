@@ -974,3 +974,128 @@ class VoiceModel(QObject):
     level = Property(float, lambda self: float(self._levels.get("level", 0.0)), notify=levelsChanged)
     score = Property(float, lambda self: float(self._levels.get("score", 0.0)), notify=levelsChanged)
     listening = Property(bool, lambda self: bool(self._levels.get("listening", False)), notify=levelsChanged)
+
+
+class SystemModel(QObject):
+    """System & health: the full health check, Vex's own logs, Start with Windows, and Restart Vex."""
+
+    changed = Signal()
+    logChanged = Signal()
+    toast = Signal(str)
+
+    def __init__(self, client: ApiClient, start_vex=None, clock=time.monotonic, parent=None):
+        super().__init__(parent)
+        self.client = client
+        self._start_vex = start_vex or (lambda: None)
+        self._clock = clock
+        self._health: dict = {}
+        self._busy = False
+        self._info: dict = {}
+        self._autostart: dict = {}
+        self._logs: list = []
+        self._logName = "vex"
+        self._logLines: list = []
+        self._restartAt: float | None = None
+        self._watch = QTimer(self)                     # after "Restart": if Vex hasn't come back on its own, start it
+        self._watch.setInterval(1000)
+        self._watch.timeout.connect(self._check_back)
+        client.connectedChanged.connect(self._on_connected)
+
+    def _on_connected(self) -> None:
+        if self.client.connected:
+            if self._restartAt is not None:
+                self._restartAt = None
+                self._watch.stop()
+                self.toast.emit("Vex is back.")
+            self.refresh()
+
+    @Slot()
+    def refresh(self) -> None:
+        if not self.client.connected:
+            return
+        self.client.call("health.last", {}, lambda ok, d, e: ok and d and self._set("_health", d))
+        self.client.call("system.info", {}, lambda ok, d, e: ok and self._set("_info", d or {}))
+        self.client.call("autostart.get", {}, lambda ok, d, e: ok and self._set("_autostart", d or {}))
+        self.client.call("logs.list", {}, lambda ok, d, e: ok and self._set("_logs", d or []))
+        self.loadLog(self._logName)
+
+    def _set(self, attr: str, value) -> None:
+        setattr(self, attr, value)
+        self.changed.emit()
+
+    @Slot()
+    def runHealth(self) -> None:
+        if self._busy:
+            return
+        self._busy = True
+        self.changed.emit()
+
+        def done(ok, d, e):
+            self._busy = False
+            if ok and d:
+                self._health = d
+            else:
+                self.toast.emit(e or "The health check didn't finish")
+            self.changed.emit()
+
+        self.client.call("health", {}, done)
+
+    @Slot(str)
+    def loadLog(self, name: str) -> None:
+        self._logName = name or "vex"
+        self.logChanged.emit()
+        self.client.call("logs.tail", {"name": self._logName, "lines": 400},
+                         lambda ok, d, e: ok and (setattr(self, "_logLines", (d or {}).get("lines", [])), self.logChanged.emit()))
+
+    @Slot()
+    def openLogs(self) -> None:
+        self.client.call("logs.open", {}, lambda ok, d, e: (not ok) and self.toast.emit(e))
+
+    @Slot(bool)
+    def setAutostart(self, on: bool) -> None:
+        def done(ok, d, e):
+            if ok:
+                self._set("_autostart", d or {})
+                self.toast.emit("Vex starts with Windows." if on else "Vex won't start with Windows (and won't turn this back on itself).")
+            else:
+                self.toast.emit(e or "That didn't work")
+
+        self.client.call("autostart.set", {"on": bool(on)}, done)
+
+    @Slot()
+    def restart(self) -> None:
+        def done(ok, d, e):
+            if not ok:
+                self.toast.emit(e or "Couldn't restart Vex")
+                return
+            self._restartAt = self._clock()
+            self._watch.start()
+            self.toast.emit("Restarting Vex…")
+
+        self.client.call("system.restart", {}, done)
+
+    def _check_back(self) -> None:
+        """Under the supervisor Vex is back in a few seconds. If it isn't after 12 s (it was started by hand), start it ourselves."""
+        if self._restartAt is None:
+            self._watch.stop()
+            return
+        if not self.client.connected and self._clock() - self._restartAt > 12:
+            self._restartAt = None
+            self._watch.stop()
+            self._start_vex()
+            self.toast.emit("Starting Vex…")
+
+    def _checks(self) -> list:
+        return [{"name": c.get("name", ""), "status": c.get("status", ""), "detail": c.get("detail", ""), "hint": c.get("hint", "")}
+                for c in (self._health or {}).get("checks", [])]
+
+    checks = Property("QVariantList", _checks, notify=changed)
+    healthSummary = Property(str, lambda self: str((self._health or {}).get("summary") or "Not checked yet this session."), notify=changed)
+    healthAt = Property(str, lambda self: str((self._health or {}).get("at") or "")[11:16], notify=changed)
+    healthBusy = Property(bool, lambda self: self._busy, notify=changed)
+    info = Property("QVariantMap", lambda self: self._info, notify=changed)
+    autostartOn = Property(bool, lambda self: bool((self._autostart or {}).get("on", False)), notify=changed)
+    logs = Property("QVariantList", lambda self: self._logs, notify=changed)
+    logName = Property(str, lambda self: self._logName, notify=logChanged)
+    logText = Property(str, lambda self: "\n".join(self._logLines), notify=logChanged)
+    restarting = Property(bool, lambda self: self._restartAt is not None, notify=changed)

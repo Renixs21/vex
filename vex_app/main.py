@@ -42,8 +42,8 @@ def main(argv: list[str] | None = None) -> int:
     from vex_app import paths
     from vex_app.client import ApiClient
     from vex_app.single import SingleInstance, ask_running_to_focus
-    from vex_app.viewmodels import (ConversationsModel, HomeModel, MemoryModel, StatusModel, TasksModel, ToolsModel, VoiceModel,
-                                    start_vex_process)
+    from vex_app.viewmodels import (ConversationsModel, HomeModel, MemoryModel, StatusModel, TasksModel, SystemModel, ToolsModel,
+                                    VoiceModel, start_vex_process)
 
     from PySide6.QtCore import QCoreApplication, Qt
     from PySide6.QtWebEngineQuick import QtWebEngineQuick
@@ -72,6 +72,8 @@ def main(argv: list[str] | None = None) -> int:
     tasks_model.toast.connect(status.toast)
     voice_model = VoiceModel(client)
     voice_model.toast.connect(status.toast)
+    system_model = SystemModel(client, start_vex=lambda: start_vex_process(paths.vex_command()))
+    system_model.toast.connect(status.toast)
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
     ctx.setContextProperty("vex", status)
@@ -81,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     ctx.setContextProperty("conversations", conversations)
     ctx.setContextProperty("tasksModel", tasks_model)
     ctx.setContextProperty("voiceModel", voice_model)
+    ctx.setContextProperty("systemModel", system_model)
     ctx.setContextProperty("appPaths", {"icons": QUrl.fromLocalFile(str(paths.ICONS) + "/").toString(),
                                         "shaders": QUrl.fromLocalFile(str(paths.SHADERS) + "/").toString(),
                                         "web": QUrl.fromLocalFile(str(paths.WEB) + "/").toString()})

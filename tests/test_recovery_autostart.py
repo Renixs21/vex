@@ -360,3 +360,14 @@ def test_build_watches_restart_the_hotkey_and_the_wake_word_but_not_while_muted(
     assert ww.check() == "idle"                                  # muted: the wake word is meant to be off
     never_registered, _ = build_watches(Hotkey(), False, wake, tray, ctl)
     assert never_registered.check() == "idle"                    # a hotkey that never registered (taken by another app) isn't "crashed"
+
+
+def test_a_requested_restart_is_not_a_crash_and_shows_no_toast(tmp_path):
+    rc, started, slept, toasts = run_supervisor(tmp_path, [75, 75, 75, 75, 0])
+    assert rc == 0 and len(started) == 5 and toasts == []                # four restarts asked for: none count against the budget
+    assert all("--restarted" not in c for c in started)
+
+
+def test_after_a_crash_then_a_requested_restart_only_the_crash_child_is_flagged(tmp_path):
+    rc, started, slept, toasts = run_supervisor(tmp_path, [1, 75, 0])
+    assert started[1][-2:] == ["--restarted", "1"] and "--restarted" not in started[2]

@@ -308,3 +308,12 @@ def test_tray_has_a_health_check_item_that_reports_back(qapp, tmp_path, monkeypa
 
 
 from test_ui_qt import qapp  # noqa: E402,F401 - the shared QApplication fixture
+
+
+def test_a_live_status_from_inside_vex_counts_as_running():
+    """The tray / API health check passes Vex's own status (no heartbeat timestamp): that is Vex, alive right now."""
+    p, _ = probes()
+    checks = health.run_checks(status={"hotkey": True, "wakeword": "running", "orb": "running", "reminders": True, "state": "idle"},
+                               probes={**p, "pid_alive": None})
+    app = next(c for c in checks if c.name == "Vex app")
+    assert app.status == PASS and "running" in app.detail

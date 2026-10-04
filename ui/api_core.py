@@ -40,7 +40,7 @@ class ApiCore:
                  dialog_confirmer=None, housekeeper=None, health_fn: Callable[[], dict] | None = None,
                  logs: Path | None = None, data: Path | None = None, budget_cfg: dict | None = None,
                  latency_path: Path | None = None, status_fn: Callable[[], dict] | None = None, hotkey: str = "", conversations=None,
-                 voice_control=None,
+                 voice_control=None, restart_fn: Callable[[], None] | None = None,
                  clock: Callable[[], float] = time.time):
         self.controller = controller
         self.executor = executor
@@ -52,6 +52,7 @@ class ApiCore:
         self.status_fn = status_fn                      # the app's live status (wake word, orb, hotkey...): app_status()
         self.conversations = conversations              # ui.conversations.ConversationLog (None: no history)
         self.voice = voice_control                      # ui.voice_control.VoiceControl (None: no voice settings)
+        self.restart_fn = restart_fn                    # quits Vex with the restart code (the supervisor starts it again)
         self.hotkey = hotkey
         self._clock = clock
         self.started_at = clock()
@@ -85,6 +86,8 @@ class ApiCore:
             "reminders.add": self.reminders_add, "reminders.cancel": self.reminders_cancel,
             "voice.get": self.voice_get, "voice.set": self.voice_set, "voice.levels": self.voice_levels, "voice.preview": self.voice_preview,
             "latency.turns": self.latency_turns,
+            "system.info": self.system_info, "system.restart": self.system_restart,
+            "logs.list": self.logs_list, "logs.tail": self.logs_tail, "logs.open": self.logs_open,
         }
 
     # ---- wiring (called by the app once) ------------------------------------------------------------------------------------
@@ -566,6 +569,90 @@ class ApiCore:
             out.append({"ts": r.get("ts"), "source": r.get("source"), "total": st.get("total"), "stt": st.get("stt"),
                         "brain": st.get("brain"), "first_audio": st.get("tts_first_audio"), "followup": bool(r.get("followup"))})
         return out
+
+    # ---- system & logs --------------------------------------------------------------------------------------------------------------------
+    LOG_FILES = {"vex": "vex.log", "supervisor": "supervisor.log", "housekeeping": "housekeeping.log", "errors": "child_stderr.txt",
+                 "health": "health.txt"}
+
+    def system_info(self, args: dict) -> dict:
+        import os
+        import platform
+        import subprocess as sp
+
+        from config import ROOT
+
+        try:
+            commit = sp.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True, timeout=3).stdout.strip()
+        except (OSError, sp.SubprocessError):
+            commit = ""
+        supervised = False
+        try:
+            import psutil
+
+            proc = psutil.Process(os.getpid())
+            for _ in range(3):                               # the venv's pythonw is a launcher: the supervisor can be a grandparent
+                proc = proc.parent()
+                if proc is None:
+                    break
+                if "--supervise" in " ".join(proc.cmdline()):
+                    supervised = True
+                    break
+        except Exception:  # noqa: BLE001
+            pass
+        return {"pid": os.getpid(), "python": platform.python_version(), "windows": platform.platform(terse=True), "commit": commit,
+                "supervised": supervised, "folder": str(ROOT), "uptime_s": int(self._clock() - self.started_at)}
+
+    def system_restart(self, args: dict) -> dict:
+        """Restart Vex: under the supervisor it comes straight back; otherwise the Control Center starts it again."""
+        if self.restart_fn is None:
+            raise ApiError("restart isn't available")
+        log.info("restart requested from the local API")
+        self._add_activity("system", action="restart")
+        import threading as _t
+
+        _t.Timer(0.4, self.restart_fn).start()                  # after this reply has gone out
+        return {"restarting": True}
+
+    def logs_list(self, args: dict) -> list[dict]:
+        out = []
+        for key, name in self.LOG_FILES.items():
+            p = self.logs / name
+            if p.exists():
+                st = p.stat()
+                out.append({"name": key, "file": name, "bytes": st.st_size,
+                            "modified": datetime.fromtimestamp(st.st_mtime).astimezone().isoformat(timespec="seconds")})
+        return out
+
+    def logs_tail(self, args: dict) -> dict:
+        """The last lines of one of Vex's own logs (keys and secrets hidden)."""
+        name = self.LOG_FILES.get(str(args.get("name", "vex")))
+        if name is None:
+            raise ApiError("unknown log")
+        n = max(10, min(2000, int(args.get("lines", 300))))
+        p = self.logs / name
+        try:
+            with p.open("rb") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                f.seek(max(0, size - 400_000))
+                text = f.read().decode("utf-8", errors="replace")
+        except OSError:
+            return {"name": args.get("name"), "lines": []}
+        from config import ROOT
+        from ui import health
+
+        redact = health.Redactor(health.secrets_from_env(ROOT))
+        lines = [redact(x) for x in text.splitlines()[-n:]]
+        return {"name": args.get("name"), "lines": lines}
+
+    def logs_open(self, args: dict) -> dict:
+        import os
+
+        try:
+            os.startfile(self.logs)  # noqa: S606
+        except OSError as e:
+            raise ApiError(f"couldn't open it: {e}") from e
+        return {"opened": str(self.logs)}
 
     # ---- voice ---------------------------------------------------------------------------------------------------------------------------
     def _voice(self):

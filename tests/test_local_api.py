@@ -468,3 +468,23 @@ def test_memory_graph_list_timeline_raw_save_forget(world, monkeypatch):
     assert done["confirmed"] and done["ok"], done
     assert not any(n["title"] == "Rahul" for n in call(world, "memory.list")["data"])
     assert len(trashed) == 1 and trashed[0].endswith(".md")                 # went to the (fake) Recycle Bin
+
+
+def test_system_info_logs_and_restart(world, monkeypatch):
+    (world.logs / "vex.log").write_text("line one\nGROQ key gsk_ABCDEFGHIJKLMNOPQRSTUV was used\nline three\n", encoding="utf-8")
+    (world.logs / "supervisor.log").write_text("supervised\n", encoding="utf-8")
+    names = {x["name"] for x in call(world, "logs.list")["data"]}
+    assert {"vex", "supervisor"} <= names
+    tail = call(world, "logs.tail", {"name": "vex", "lines": 10})["data"]["lines"]
+    assert tail[0] == "line one" and "gsk_" not in tail[1] and "[hidden]" in tail[1]
+    assert call(world, "logs.tail", {"name": "../../.env"})["error"] == "unknown log"          # only Vex's own logs, by name
+    info = call(world, "system.info")["data"]
+    assert info["pid"] > 0 and info["python"] and "supervised" in info
+    assert call(world, "system.restart")["error"] == "restart isn't available"
+    restarted = []
+    world.core.restart_fn = lambda: restarted.append(1)
+    assert call(world, "system.restart")["data"] == {"restarting": True}
+    deadline = time.time() + 3
+    while not restarted and time.time() < deadline:
+        time.sleep(0.05)
+    assert restarted == [1]

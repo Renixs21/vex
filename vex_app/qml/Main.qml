@@ -44,7 +44,8 @@ Window {
                            : win.current === "tools" ? toolsComp
                            : win.current === "conversations" ? conversationsComp
                            : win.current === "tasks" ? tasksComp
-                           : win.current === "voice" ? voiceComp : placeholderComp
+                           : win.current === "voice" ? voiceComp
+                           : win.current === "system" ? systemComp : placeholderComp
             opacity: 0
             onLoaded: { opacity = 0; slide.restart() }
             transform: Translate { id: shift; x: 0 }
@@ -63,6 +64,7 @@ Window {
     Component { id: conversationsComp; Conversations {} }
     Component { id: tasksComp; Tasks {} }
     Component { id: voiceComp; Voice {} }
+    Component { id: systemComp; System {} }
     Component { id: placeholderComp; Placeholder { title: win.titles[win.current] || "" } }
 
     // a short message at the bottom (e.g. "Starting Vex...")

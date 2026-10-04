@@ -408,8 +408,8 @@ def run_checks(live: bool = False, status: dict | None = None, probes: dict | No
         ("tts", lambda: check_tts(config.settings["voice"].get("edge_voice", "en-US-AriaNeural"), p.get("tts_synth"), p.get("windows_tts"))),
         ("mic", lambda: check_mic(p.get("record"), p.get("windows_muted"))),
         ("wake", lambda: check_wakeword(config.wakeword_config(), root, p.get("wake_load"))),
-        ("app", lambda: check_running(status if status is not None else read_heartbeat(root / "data" / "status.json"),
-                                      pid_alive=p.get("pid_alive"))),
+        ("app", lambda: check_running({"ts": time.time(), "pid": os.getpid(), **status} if status is not None   # live: from Vex itself
+                                      else read_heartbeat(root / "data" / "status.json"), pid_alive=p.get("pid_alive"))),
         ("memory", lambda: check_memory(vault)),
         ("reminders", lambda: check_reminders(root / "data" / "reminders.json")),
         ("disk", lambda: check_disk(root, logs, vault, p.get("free_bytes"), p.get("size_mb", folder_mb))),

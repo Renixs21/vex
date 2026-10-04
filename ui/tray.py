@@ -62,6 +62,7 @@ class TrayController(QObject):
     _state_sig = Signal(str)
     _health_sig = Signal(str, str)                                  # (summary, report path) from the health check thread
     _mute_sig = Signal()                                            # refresh the mute icon from any thread
+    _restart_sig = Signal()                                         # "Restart Vex" from the Control Center (any thread)
 
     def __init__(self, app: QApplication, controller, frontend, executor, *, config_path: Path | None = None,
                  on_quit: Callable[[], None] | None = None, hotkey_text: str = "Ctrl+Alt+V", parent=None, autostart_api=None):
@@ -114,6 +115,7 @@ class TrayController(QObject):
         self._state_sig.connect(self._on_state)
         self._health_sig.connect(self._health_done)
         self._mute_sig.connect(self.refresh_mute_icon)
+        self._restart_sig.connect(self._restart)
         controller.listeners.append(self._state_sig.emit)       # states arrive from worker threads; the signal marshals
 
     # ---- construction helpers --------------------------------------------------------------------------------------------
@@ -301,6 +303,16 @@ class TrayController(QObject):
             os.startfile(path)  # noqa: S606
         except OSError as e:
             self.notify("Couldn't open folder", str(e))
+
+    def restart_vex(self) -> None:
+        """Quit with the restart code: the supervisor starts Vex again at once (from any thread: marshalled to Qt)."""
+        self._restart_sig.emit()
+
+    def _restart(self) -> None:
+        self.tray.hide()
+        if self.on_quit:
+            self.on_quit()
+        self.app.exit(75)
 
     def _quit(self) -> None:
         self.tray.hide()

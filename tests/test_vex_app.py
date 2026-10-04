@@ -15,7 +15,7 @@ from ui.api_core import ApiCore                                     # noqa: E402
 from ui.api_server import ApiServer                                  # noqa: E402
 from vex_app.client import ApiClient                                 # noqa: E402
 from vex_app.viewmodels import (ConversationsModel, HomeModel, MemoryModel, StatusModel, TasksModel, ToolsModel,  # noqa: E402
-                                VoiceModel)
+                                SystemModel, VoiceModel)
 
 TOKEN = "z" * 43
 APP_DIR = Path(__file__).resolve().parent.parent / "vex_app"
@@ -216,6 +216,7 @@ def test_the_qml_loads_without_errors_connected_and_offline(qtbot, server):
         ctx.setContextProperty("conversations", ConversationsModel(client))
         ctx.setContextProperty("tasksModel", TasksModel(client))
         ctx.setContextProperty("voiceModel", VoiceModel(client))
+        ctx.setContextProperty("systemModel", SystemModel(client))
         ctx.setContextProperty("appPaths", {"icons": QUrl.fromLocalFile(str(paths.ICONS) + "/").toString(),
                                             "shaders": QUrl.fromLocalFile(str(paths.SHADERS) + "/").toString(),
                                             "web": QUrl.fromLocalFile(str(paths.WEB) + "/").toString()})
@@ -578,3 +579,49 @@ def test_voice_model_reads_polls_and_changes_settings(qtbot, tmp_path):
         client.stop()
     finally:
         srv.stop()
+
+
+# ---- the system model --------------------------------------------------------------------------------------------------------------------
+def test_system_model_health_logs_autostart_and_restart(qtbot, tmp_path, _autostart_never_touches_the_real_registry):
+    c, *_ = make()
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "vex.log").write_text("first\nsecond\n", encoding="utf-8")
+    core = ApiCore(controller=c, logs=logs, data=tmp_path,
+                   health_fn=lambda: {"summary": "Everything passed.", "checks": [{"name": "API keys", "status": "PASS", "detail": "set"}]})
+    srv = ApiServer(core, TOKEN, port=0)
+    assert srv.start()
+    started = []
+    try:
+        client = connect(qtbot, srv.bound_port)
+        m = SystemModel(client, start_vex=lambda: started.append(1), clock=lambda: 1000.0)
+        qtbot.waitUntil(lambda: bool(m.logs) and m.logText == "first\nsecond", timeout=8000)
+        assert m.healthSummary == "Not checked yet this session." and m.info.get("pid")
+        m.runHealth()
+        qtbot.waitUntil(lambda: bool(m.checks), timeout=5000)
+        assert m.checks[0]["status"] == "PASS" and m.healthSummary == "Everything passed." and not m.healthBusy
+        m.setAutostart(True)
+        qtbot.waitUntil(lambda: m.autostartOn, timeout=5000)
+        m.setAutostart(False)
+        qtbot.waitUntil(lambda: not m.autostartOn, timeout=5000)
+        toasts = []
+        m.toast.connect(toasts.append)
+        m.restart()                                                    # no restart function in this core: refused politely
+        qtbot.waitUntil(lambda: bool(toasts), timeout=5000)
+        assert "restart" in toasts[-1].lower() and not m.restarting
+        client.stop()
+    finally:
+        srv.stop()
+
+
+def test_after_a_restart_the_app_starts_vex_itself_if_nothing_brought_it_back(qtbot):
+    t = [0.0]
+    started = []
+    m = SystemModel(ApiClient(1, lambda: ""), start_vex=lambda: started.append(1), clock=lambda: t[0])
+    m._restartAt = 0.0
+    t[0] = 5.0
+    m._check_back()
+    assert started == []                                              # give the supervisor time
+    t[0] = 13.0
+    m._check_back()
+    assert started == [1] and not m.restarting
